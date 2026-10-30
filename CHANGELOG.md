@@ -1,5 +1,11 @@
 # Changes
 
+## 0.3.2
+
+- Mark the delivered scope explicitly as completed and stable.
+- Replace the inherited experimental status filename with RELEASE-STATUS.md.
+- Keep validation evidence, runtime defaults, and documented capability limits unchanged.
+
 ## 0.3.1
 
 - Neutral English branding, independent repository, and a fresh public history.

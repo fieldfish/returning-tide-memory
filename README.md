@@ -2,6 +2,8 @@
 
 Local long-term retrieval, contextual working memory, and sourced continuity for DSH.
 
+**Status: Completed — stable release.** See [release status](RELEASE-STATUS.md) and [implemented scope](docs/STATUS.md).
+
 Returning Tide Memory archives host-visible conversation and tool events in a separate SQLite library. It retrieves small evidence cards, follows source references, reconstructs nearby conversation, and carries versioned state and unfinished tasks across explicit handoffs.
 
 It does not rewrite persona files. A retrieved passage is a candidate, not proof that an event happened. Plans, reports, creative writing, host tool results, and verified outcomes remain distinguishable.

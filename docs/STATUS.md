@@ -1,4 +1,6 @@
-# Scope and limits
+# Status: Completed
+
+The defined release scope is implemented and validated. Returning Tide Memory is distributed as a stable release. Installation, runtime configuration, and binding to an existing library remain explicit deployment steps.
 
 Implemented: source archival, local hybrid retrieval, versioned state/situations, triggered bounded working memory, source-adjacent scenes, attributed fading/reinforcement, checkpoints, explicit owner handoff, uncertain-action recovery, structured activity views, local management, and consistent snapshots.
 

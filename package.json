@@ -1,6 +1,6 @@
 {
   "name": "dsh-returning-tide-memory",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": false,
   "description": "Returning Tide Memory: local long-term retrieval, contextual working memory, and sourced continuity for DSH.",
   "type": "module",
@@ -45,7 +45,7 @@
     "cordis.patch.yml",
     "README.md",
     "START-HERE.md",
-    "EXPERIMENTAL-STATUS.md",
+    "RELEASE-STATUS.md",
     "LICENSE",
     "PACKAGE-STATUS.json",
     "SHA256SUMS.json",
