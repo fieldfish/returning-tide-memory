@@ -1,11 +1,11 @@
 {
   "project": "Returning Tide Memory",
   "package": "dsh-returning-tide-memory",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "license": "MIT",
   "schema": 3,
-  "offline_tests": 334,
-  "syntax_files": 65,
+  "offline_tests": 337,
+  "syntax_files": 67,
   "privacy_audit": "passed",
   "fresh_public_history": true,
   "baseline_engine_evidence": {
@@ -32,5 +32,9 @@
     "Legacy import namespace must be configured explicitly"
   ],
   "status": "completed",
-  "release_channel": "stable"
+  "release_channel": "stable",
+  "management_languages": [
+    "en",
+    "zh-CN"
+  ]
 }

@@ -14,8 +14,23 @@ async function fixture(t,config={}){
  t.after(async()=>{await plugin.dispose();rmSync(directory,{recursive:true,force:true})})
  const token=new URL(plugin.manager.url).hash.slice(1)
  async function api(action,args={},headers={}){const response=await fetch(plugin.manager.origin+'/api',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+token,...headers},body:JSON.stringify({action,...args})});return {http:response.status,...await response.json()}}
- return {plugin,agent,directory,api,modelCalls:()=>modelCalls}
+  return {plugin,agent,directory,api,modelCalls:()=>modelCalls}
 }
+
+test('management follows native title revisions without changing session identity or calling a model',async t=>{
+ const f=await fixture(t),created=await f.api('create',{name:'Synthetic title display'}),library_id=created.result.library.id
+ await f.api('bind',{library_id,session:f.agent.session.id,expected_revision:0})
+ const originalId=f.agent.session.id,events=[{type:'session/title',data:{title:'Earlier synthetic title'}},{type:'session/title',data:{title:'Current synthetic title'}}]
+ f.agent.session.header.title='Stale header title';f.agent.session.snapshotEvents=()=>events
+ const overview=(await f.api('overview')).result
+ assert.equal(overview.sessions[0].title,'Current synthetic title');assert.equal(overview.sessions[0].id,originalId)
+ assert.equal(overview.libraries[0].owner_title,'Current synthetic title');assert.equal((await f.api('inspect',{library_id})).result.library.owner_title,'Current synthetic title')
+ events.push({type:'session/title',data:{title:'Renamed synthetic title'}})
+ assert.equal((await f.api('overview')).result.sessions[0].title,'Renamed synthetic title')
+ f.agent.session.snapshotEvents=()=>[];assert.equal((await f.api('overview')).result.sessions[0].title,'Stale header title')
+ delete f.agent.session.header.title;assert.equal((await f.api('overview')).result.sessions[0].title,originalId)
+ assert.equal(f.plugin.store.library(library_id).owner,originalId);assert.equal(events.length,3);assert.equal(f.modelCalls(),0)
+})
 
 test('管理页可只读核对淡出与使用依据；不开模型、不允许跨库读取',async t=>{
  const f=await fixture(t),created=await f.api('create',{name:'使用反馈管理'}),library_id=created.result.library.id

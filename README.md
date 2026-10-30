@@ -1,5 +1,7 @@
 # Returning Tide Memory
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Local long-term retrieval, contextual working memory, and sourced continuity for DSH.
 
 **Status: Completed — stable release.** See [release status](RELEASE-STATUS.md) and [implemented scope](docs/STATUS.md).
@@ -50,6 +52,8 @@ Optional automatic features default to off. Enable only the ones you want in a s
 Background extraction/consolidation additionally requires explicit model configuration, budgets, and separate resume operations. Saving configuration does not start paid calls. Embeddings use the configured localhost service.
 
 ## Documentation
+
+The local management page supports English and Simplified Chinese. Select the language at the top of the page. Session selectors show the current DSH conversation title; stable IDs remain available in expandable details and continue to identify every operation. Language changes affect interface text only, preserving archived material and user titles.
 
 [Tool API](docs/API.md) · [Architecture](docs/ARCHITECTURE.md) · [Installation](docs/INSTALL.md) · [Migration](docs/MIGRATION.md) · [Recovery](docs/RECOVERY.md) · [Privacy](docs/PRIVACY.md) · [Validation](docs/VALIDATION.md) · [Changes](CHANGELOG.md)
 

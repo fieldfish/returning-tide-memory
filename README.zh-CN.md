@@ -1,0 +1,66 @@
+# Returning Tide Memory
+
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+为 DSH 提供本地长期检索、情境工作记忆与有出处的跨会话接续。
+
+**状态：已完成，正式版。** 完成范围见 [功能状态](docs/STATUS.md)，验证范围见 [验证说明](docs/VALIDATION.md)。
+
+插件把宿主可见的聊天、工具动作和结果保存在独立 SQLite 记忆库中。模型需要回忆时，先获取短卡，再按需读取原文与相邻对话；检查点、自述版本和情境档案帮助后续会话接上进度。
+
+人格文件不会被插件重写。计划、自述、创作、宿主工具结果和经过核实的结果保持可区分；检索命中表示找到了候选资料，不能自动认定某件事发生过。
+
+## 已实现功能
+
+- **长期检索：** 本地 Ollama embedding 与词法混合召回，可选情境摘要向量索引。
+- **精简返回：** id、标题、分数、一句话摘要和时间；完整单卡不超过 120 个 Unicode 字符，最多五条。原文另外读取。
+- **工作记忆：** 消息、新任务、工具失败、可见活动线索和明确切换触发检索。通常自动材料上限 800 字符，展开与恢复总上限 1800 字符。
+- **情境与场景：** 保存有出处的情境、自述版本和相关任务；可读取当时相邻聊天，区分当时所说与后来理解。
+- **淡忘与强化：** 时间降低召回权重，不自动删除原文。只有有依据的实际使用、重申、纠正等反馈改变权重，曝光和读到不算强化。
+- **接续与恢复：** 一库一个活动主会话，显式交接；保存检查点，对结果不明的外部动作保留人工核查入口。
+- **活动归档：** 可选工具结构化载荷和带时间的活动片段报告；请求、宿主返回与主体自述分别保存。
+- **本机管理：** 中英界面切换、真实会话名称、状态与预算、来源查看、分页、备份和恢复到独立副本。
+
+## 安装与使用
+
+需要 Node >=22.13、兼容的 DSH 宿主，以及本地 Ollama 与 `qwen3-embedding:0.6b`。模型权重、DSH、账号和用户记忆不包含在安装包里。
+
+1. 从 [发行页](https://github.com/fieldfish/returning-tide-memory/releases/latest) 下载压缩包，解压到新目录。
+2. 运行 `npm test`、`npm run check` 和 `node cli.mjs --doctor`。
+3. 在 `cordis.patch.yml` 中将 `dataDirectory` 改为自己的绝对路径。初装使用新目录；升级已有库先做一致性备份，参见 [迁移说明](docs/MIGRATION.md)。
+4. 通过 DSH 插件管理器或所用发行版支持的 profile 命令载入本地包，例如：
+
+~~~text
+dsh plugin --profile YOUR_PROFILE add "link:C:\agent-test\returning-tide-memory"
+~~~
+
+5. 启用 `manager.enabled`，运行 `node cli.mjs --data YOUR_ABSOLUTE_DATA_DIRECTORY --open-manager` 打开本机管理页。先建库，再明确绑定已加载、空闲的主会话。
+
+管理页顶部可以选择 **简体中文 / English**。主会话按 DSH 的真实标题显示；完整 ID 放在展开详情中，底层绑定始终使用 ID。修改显示语言不翻译或改写用户记忆、会话标题、原文和标识。
+
+自动工作记忆、淡忘权重、情境索引和活动归档默认关闭，可按需要启用：
+
+~~~json
+{
+  "workingMemory": {"enabled": true},
+  "memoryDynamics": {"enabled": true, "semanticThreshold": 0.84},
+  "situationIndex": {"enabled": true},
+  "activityArchive": {"enabled": true, "maxPayloadBytes": 1048576, "redactCredentials": true}
+}
+~~~
+
+后台认识整理、情境整理和额外证据核验需要单独配置模型、预算并恢复运行。只保存配置不会自动发起付费调用。本地管理入口凭据只用于本机，不要放进模型上下文。
+
+## 原理与边界
+
+原文留档 → 分片与 embedding → 混合召回 → 相关性和来源复核 → 有预算的短卡、相邻场景与工作集。原文与整理层分开，整理和检索都有出处，旧认识与后来的变化可以并存。
+
+原文成功保存不保证每次都能准确召回，也不代表无限原生上下文、主观人格连续或永久不间断运行。只采集宿主实际可见且成功保存的事件；活动报告不证明已经观看视频、玩过游戏或完成外部动作。目前不包含自动跟随播放器的逐秒观察与完整音视频载体留档。原始材料和诊断信息保留其来源语言。
+
+公开包使用中性合成示例，不包含用户人格、私人对话、记忆库、账号凭据或私人施工日志；与桌面伙伴应用分别管理。源代码和接口标识保持英文，中文功能说明与界面属于语言支持。
+
+## 说明文档
+
+[工具接口](docs/API.md) · [架构](docs/ARCHITECTURE.md) · [安装](docs/INSTALL.md) · [迁移](docs/MIGRATION.md) · [恢复](docs/RECOVERY.md) · [隐私](docs/PRIVACY.md) · [验证](docs/VALIDATION.md) · [更新记录](CHANGELOG.md)
+
+MIT 开源，保留 [上游参考与许可说明](docs/THIRD-PARTY-NOTES.md)。DSH 负责模型运行循环，本插件不依赖 LangGraph。

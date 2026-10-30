@@ -1,5 +1,10 @@
 # Changes
 
+## 0.3.3
+
+- Display current native session titles in the management selector and library ownership summary, keeping operation targets as stable IDs.
+- Add English and Simplified Chinese documentation and a management-page language selector.
+
 ## 0.3.2
 
 - Mark the delivered scope explicitly as completed and stable.
