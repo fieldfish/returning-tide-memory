@@ -1,0 +1,35 @@
+{
+  "project": "Returning Tide Memory",
+  "package": "dsh-returning-tide-memory",
+  "version": "0.3.1",
+  "license": "MIT",
+  "schema": 3,
+  "offline_tests": 334,
+  "syntax_files": 65,
+  "privacy_audit": "passed",
+  "fresh_public_history": true,
+  "production_deployed": false,
+  "baseline_engine_evidence": {
+    "version": "0.3.0",
+    "offline_tests": 330,
+    "actual_model_handoff_scenarios": 2,
+    "native_compaction": true,
+    "normal_host_restart": true,
+    "synthetic_experiences": true,
+    "not_repeated_for_renamed_corpus": true
+  },
+  "defaults": {
+    "workingMemory": false,
+    "memoryDynamics": false,
+    "situationIndex": false,
+    "activityArchive": false
+  },
+  "limits": [
+    "Probabilistic retrieval, not guaranteed perfect recall",
+    "Host-visible stored events only",
+    "Finite situation projections",
+    "No subjective identity continuity proof",
+    "No automatic player observer or complete multimedia carriers",
+    "Legacy import namespace must be configured explicitly"
+  ]
+}

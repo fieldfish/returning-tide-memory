@@ -1,0 +1,14 @@
+{
+  "project": "Returning Tide Memory",
+  "version": "0.3.1",
+  "scope": "Tracked source and distributed artifacts; fresh public history required",
+  "private_artifacts": 0,
+  "personal_identifiers": 0,
+  "credential_patterns": 0,
+  "legacy_persona_defaults": 0,
+  "neutral_synthetic_actors": true,
+  "desktop_companion_code_included": false,
+  "previous_git_history_included": false,
+  "passed": true,
+  "source_files_scanned": 94
+}

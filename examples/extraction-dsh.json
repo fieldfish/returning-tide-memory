@@ -1,0 +1,11 @@
+{
+  "source": "dsh",
+  "provider": "YOUR_REGISTERED_PROVIDER",
+  "model": "YOUR_MODEL",
+  "maxCallsPerDay": 12,
+  "maxInputChars": 12000,
+  "maxOutputTokens": 1800,
+  "minIntervalMs": 60000,
+  "evidenceEnabled": false,
+  "situationsEnabled": false
+}

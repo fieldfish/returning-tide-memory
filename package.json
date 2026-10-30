@@ -1,0 +1,88 @@
+{
+  "name": "dsh-returning-tide-memory",
+  "version": "0.3.1",
+  "private": false,
+  "description": "Returning Tide Memory: local long-term retrieval, contextual working memory, and sourced continuity for DSH.",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./core": "./lib/store.mjs",
+    "./execution": "./lib/execution.mjs",
+    "./recovery": "./lib/recovery.mjs",
+    "./snapshot": "./lib/snapshot.mjs",
+    "./dsh-adapter": "./lib/dsh-events.mjs",
+    "./state-history": "./lib/state-history.mjs",
+    "./situations": "./lib/situations.mjs",
+    "./working-memory": "./lib/working-memory.mjs",
+    "./scenes": "./lib/scenes.mjs",
+    "./source-log": "./lib/source-log.mjs",
+    "./consolidation": "./lib/consolidation.mjs",
+    "./memory-dynamics": "./lib/memory-dynamics.mjs",
+    "./situation-index": "./lib/situation-index.mjs",
+    "./activity-archive": "./lib/activity-archive.mjs",
+    "./source-position": "./lib/source-position.mjs",
+    "./tool-context": "./lib/tool-context.mjs"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    }
+  },
+  "files": [
+    "index.mjs",
+    "cli.mjs",
+    "lib",
+    "web",
+    "test",
+    "examples",
+    "cordis.patch.yml",
+    "README.md",
+    "START-HERE.md",
+    "EXPERIMENTAL-STATUS.md",
+    "LICENSE",
+    "PACKAGE-STATUS.json",
+    "SHA256SUMS.json",
+    "evals",
+    "docs",
+    "CHANGELOG.md",
+    "PRIVACY-AUDIT.json"
+  ],
+  "dsh": {
+    "runtime": "host",
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT",
+  "scripts": {
+    "test": "node test/run-tests.mjs",
+    "check": "node --check index.mjs && node --check cli.mjs && node --check lib/execution.mjs && node --check lib/manager.mjs && node --check lib/situations.mjs && node --check lib/situation-index.mjs && node --check lib/activity-archive.mjs && node --check lib/source-position.mjs && node --check lib/context-frame.mjs && node --check lib/working-memory.mjs && node --check lib/consolidation.mjs && node --check lib/source-log.mjs && node --check lib/memory-dynamics.mjs && node --check web/manager.js && node --check lib/tool-context.mjs",
+    "soak": "node --expose-gc test/soak.mjs 120",
+    "soak:working": "node --expose-gc test/soak.mjs 120 --working",
+    "soak:dynamics": "node --expose-gc test/soak.mjs 120 --working --dynamics",
+    "soak:situations": "node --expose-gc test/soak.mjs 120 --working --dynamics --situations",
+    "soak:activity": "node --expose-gc test/soak.mjs 120 --working --dynamics --situations --activity",
+    "benchmark": "node evals/lookup-benchmark.mjs",
+    "recall": "node evals/recall-quality.mjs",
+    "recall:working": "node evals/working-quality.mjs",
+    "recall:dynamics": "node evals/working-quality.mjs --dynamics",
+    "recall:situations": "node evals/situation-quality.mjs",
+    "recall:activity": "node evals/activity-quality.mjs",
+    "recall:corrections": "node evals/correction-quality.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fieldfish/returning-tide-memory.git"
+  },
+  "homepage": "https://github.com/fieldfish/returning-tide-memory#readme",
+  "bugs": {
+    "url": "https://github.com/fieldfish/returning-tide-memory/issues"
+  }
+}

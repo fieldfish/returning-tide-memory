@@ -1,0 +1,21 @@
+- insert:
+    - id: continuity-core
+      name: dsh-returning-tide-memory
+      config:
+        # Replace with a NEW absolute test directory before installation.
+        dataDirectory: C:/agent-test/continuity-data
+        manager:
+          enabled: true
+        workingMemory:
+          enabled: false
+        memoryDynamics:
+          enabled: false
+        situationIndex:
+          enabled: false
+        activityArchive:
+          enabled: false
+          maxPayloadBytes: 1048576
+          redactCredentials: true
+        embedding:
+          ollamaUrl: http://127.0.0.1:11434
+          model: qwen3-embedding:0.6b

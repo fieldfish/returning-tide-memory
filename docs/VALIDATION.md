@@ -1,0 +1,9 @@
+# Validation
+
+The 0.3 engine completed 330 offline checks, official host tool-schema validation, desktop/narrow-browser UI verification, consistent legacy-copy migration and restore checks, 1000 synthetic lifecycle cycles, and a three-minute isolated actual-host observation. Two actual DSH/DeepSeek handoff scenarios verified fresh-session recall, preference revisions, unfinished-task continuation, actual native compaction, normal host restart, specific corrections, separate similar projects, source-adjacent context, and unsupported-history abstention. Those tests used synthetic experiences and did not modify a live user companion.
+
+Version 0.3.1 changes branding, deployment-specific legacy selection, and neutral fixtures. The current offline tests and privacy audit are rerun on the exact public tree. Generic legacy namespace selection, read-only import, parameterized selectors, and replay exclusion have additional tests. The previous two dialogue scenarios are engine evidence; they are not described as newly rerun after fixture renaming.
+
+Run npm test and npm run check without model credentials. npm run soak:activity uses synthetic temporary data. recall:* evaluations require the configured local Ollama embedding; they do not call a cloud dialogue model. Renamed fixtures can change measured retrieval ranks, so historical numeric retrieval results are not rewritten and republished as measurements of this corpus.
+
+Compatibility evidence covers the installed DSH NEXT host/SDK combination on Windows and Node 24.22.1. The package declares Node >=22.13, but does not claim an exhaustive host/OS matrix. Fast loops and a three-minute observation do not prove weeks of uptime. Developer-authored examples are not an independent blind study, and no test proves subjective identity continuity or perfect recall.

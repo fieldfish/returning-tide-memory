@@ -1,0 +1,12 @@
+{
+  "source": "api",
+  "baseURL": "https://YOUR_PROVIDER/v1",
+  "model": "YOUR_MODEL",
+  "apiKeyEnv": "CONTINUITY_EXTRACTION_API_KEY",
+  "maxCallsPerDay": 12,
+  "maxInputChars": 12000,
+  "maxOutputTokens": 1800,
+  "minIntervalMs": 60000,
+  "evidenceEnabled": false,
+  "situationsEnabled": false
+}
