@@ -11,13 +11,30 @@ const readableProjection=value=>String(value||'').replace(/\[(explicit|model-con
 const phaseLabels={requested:ui('已记录请求'),'host-returned':ui('宿主已返回'),'host-error':ui('宿主返回错误'),'host-outcome-unknown':ui('结果仍未知'),reported:ui('观察报告'),'host-node':ui('任务节点')}
 async function api(action,args={}){const r=await fetch('/api',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({action,...args})});const v=await r.json();if(!v.ok)throw Error(v.message||v.error);return v.result}
 function notice(s){$('notice').textContent=s}
-async function work(fn){if(busy)return;busy=true;document.querySelectorAll('button,input,select').forEach(b=>b.disabled=true);try{await fn()}catch(e){notice(ui('未完成：')+e.message)}finally{busy=false;document.querySelectorAll('button,input,select').forEach(b=>b.disabled=false);taskNav();activityNav()}}
+async function work(fn){if(busy)return;busy=true;document.querySelectorAll('button,input,select').forEach(b=>b.disabled=true);try{await fn()}catch(e){notice(ui('未完成：')+e.message)}finally{busy=false;document.querySelectorAll('button,input,select').forEach(b=>b.disabled=false);taskNav();activityNav();ownership()}}
 function select(id,items,value,label){const el=$(id);el.replaceChildren();for(const item of items){const o=document.createElement('option');o.value=value(item);o.textContent=label(item);el.append(o)}}
 function text(tag,value,cls){const e=document.createElement(tag);e.textContent=value;if(cls)e.className=cls;return e}
 const sessionStatus={idle:ui('空闲'),running:ui('运行中'),error:ui('异常')}
 const titleOf=session=>session?.title&&session.title!==session.id?session.title:ui('未命名会话')
 function sessionLabel(session){const title=titleOf(session),matching=state.overview.sessions.filter(other=>titleOf(other)===title),duplicate=matching.length>1,suffix=session.id.slice(-8),ambiguous=matching.some(other=>other.id!==session.id&&other.id.slice(-8)===suffix);return title+(duplicate?' · '+(ambiguous?session.id:suffix):'')+' · '+(sessionStatus[session.status]||session.status)}
-function sessionDetails(){const owner=state.library?.owner;$('sessionDetails').textContent=ui('当前主会话 ID：')+(owner||ui('尚未绑定'))+ui('\n所选会话 ID：')+($('session').value||ui('尚未选择'))}
+function sessionDetails(){const owner=state.library?.owner;$('sessionDetails').textContent=ui('当前主会话 ID：')+(owner||ui('尚未绑定'))+ui('\n所选会话 ID：')+($('session').value||ui('尚未选择'));ownership()}
+function ownership(){
+ const lib=state.library,owner=lib?.owner,target=$('session').value,session=state.overview?.sessions.find(s=>s.id===owner),title=lib?.owner_title||session?.title||ui('主会话未加载或尚未命名'),different=!!owner&&!!target&&owner!==target
+ $('ownerBanner').textContent=lib?ui('当前主会话：')+(owner?title:ui('尚未绑定'))+(different?ui(' · 所选会话不同；不会自动抢占，需显式交接。'):ui(' · 一库一主，其他窗口不会自动接管。')):ui('还没有记忆库。可以先创建一个独立库。')
+ $('ownerBanner').classList.toggle('warning',different)
+ if(!busy){$('bind').disabled=!lib||!!owner||!target;$('handoff').disabled=!lib||!owner||!different}
+}
+$('recoveryJump').onclick=()=>{$('recoveryPanel').scrollIntoView({behavior:'smooth',block:'start'});$('recoveryPanel').focus({preventScroll:true})}
+function healthBanners(r){
+ const incomplete=r.embedding.index_work_remaining||r.working?.frame?.status==='index-incomplete',count=r.recovery.operations.length+r.recovery.legacy.length
+ $('indexBanner').hidden=!incomplete
+ $('indexBanner').textContent=ui('索引未完成，原文仍在，召回结果可能不全。')+ui` 已索引 ${r.embedding.indexed_parts??0}，待索引 ${r.embedding.pending_parts??0}，尚未分片 ${r.embedding.unprepared_records??0}。`
+ $('recoveryBanner').hidden=!count
+ $('recoveryMessage').textContent=ui`有 ${count} 项操作结果待核对。仅写操作受限，聊天和已识别的只读查阅仍可用；不会自动重放。`
+ const cards=$('recallCards');if(cards){cards.replaceChildren();for(const c of r.recall_cards||[]){const row=text('div','','item'),title=c.title.replace(/^(对话|旧文件|旧笔记|工具|笔记)·/,(_all,label)=>ui(label)+' · ');row.append(text('strong',title),text('div',c.id+' · '+c.score+' · '+c.time,'small'),text('p',c.summary),text('blockquote',c.quote||''));cards.append(row)}}
+}
+// Refresh only operational indicators; never overwrite forms or a human review in progress.
+setInterval(async()=>{if(busy||document.hidden||!state.library)return;const id=state.library.id;try{const r=await api('health',{library_id:id});if(state.library?.id!==id||busy)return;state.library=r.library;healthBanners(r);ownership()}catch{notice(ui('状态刷新失败，请点击刷新核对；未改动记忆。'))}},10000)
 async function refresh(){const prior=$('library').value,priorSession=$('session').value;state.overview=await api('overview');select('library',state.overview.libraries,l=>l.id,l=>l.name);if([...$('library').options].some(o=>o.value===prior))$('library').value=prior;select('session',state.overview.sessions,a=>a.id,sessionLabel);for(const option of $('session').options)option.title=option.value;const owner=state.overview.libraries.find(l=>l.id===$('library').value)?.owner,target=state.overview.sessions.some(s=>s.id===priorSession)?priorSession:owner;if([...$('session').options].some(o=>o.value===target))$('session').value=target;await inspect();notice(ui('已刷新。本机管理不会发送模型消息。'))}
 $('session').onchange=sessionDetails
 const chosen=()=>{if(!state.library)throw Error(ui('请先选择或创建记忆库'));return {library_id:state.library.id}}
@@ -27,6 +44,7 @@ function tasks(page){const prior=$('task').value;state.taskPage=page;state.taskD
 async function inspect(){
  if(!$('library').value){state.library=null;$('summary').textContent=ui('还没有记忆库。可以先创建一个独立库。');sessionDetails();return}
  const r=await api('inspect',{library_id:$('library').value});state.library=r.library
+ healthBanners(r)
  const md=r.memory_dynamics
  $('dynamicsState').textContent=(md?.enabled?ui('已应用到检索排序；原文与人格保留。'):ui('当前只查看反馈；尚未应用到检索排序。'))+ui`\n纠正线索：${md?.total_cues??0} 条 · 已索引：${md?.indexed_cues??ui('尚未核对模型')} · 待补建：${md?.pending_cues??ui('未知')}\n索引状态：${md?.maintenance?.paused?ui('已暂停 / ')+md.maintenance.error:ui('正常')}`
  $('dynamicsDetail').textContent=''
@@ -54,7 +72,7 @@ async function inspect(){
 $('refresh').onclick=()=>work(refresh);$('library').onchange=()=>work(inspect)
 $('create').onclick=()=>work(async()=>{const name=prompt(ui('新库名称'));if(!name)return;await api('create',{name});await refresh()})
 $('rename').onclick=()=>work(async()=>{const name=prompt(ui('记忆库的新名称'),state.library?.name);if(!name)return;await api('rename',{...chosen(),name,expected_revision:state.library.revision});await refresh()})
-for(const action of ['bind','handoff'])$(action).onclick=()=>work(async()=>{if(!confirm(ui`将“${state.library?.name}”${action==='bind'?ui('绑定'):ui('交接')}到所选会话？交接会正常停止旧执行，并保留排队输入。`))return;await api(action,{...chosen(),session:$('session').value,expected_revision:state.library.revision});await refresh()})
+for(const action of ['bind','handoff'])$(action).onclick=()=>work(async()=>{const from=state.library?.owner_title||state.library?.owner||ui('尚未绑定'),to=state.overview.sessions.find(s=>s.id===$('session').value)?.title||$('session').value;if(!confirm(ui`记忆库“${state.library?.name}”：从“${from}”到“${to}”。确认交接？旧执行会正常停止，排队输入保留。`))return;await api(action,{...chosen(),session:$('session').value,expected_revision:state.library.revision});await refresh()})
 for(const action of ['pause','resume'])$(action).onclick=()=>work(async()=>{await api(action,chosen());await inspect();notice(action==='pause'?ui('已暂停此库。'):ui('已恢复；没有重放失败任务。'))})
 $('backup').onclick=()=>work(async()=>{const r=await api('backup');notice(ui('校验快照已生成：')+r.directory)})
 $('restore').onclick=()=>work(async()=>{const r=await api('restore-copy',{snapshot:$('snapshot').value,destination:$('destination').value});notice(ui('已创建未绑定、暂停的副本：')+r.directory)})

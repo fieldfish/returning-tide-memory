@@ -13,7 +13,7 @@ It does not rewrite persona files. A retrieved passage is a candidate, not proof
 ## Features
 
 - Local Ollama embeddings plus lexical retrieval; optional finite situation-summary vectors.
-- Five-field lookup cards: id, title, score, summary, time. Each complete card is at most 120 Unicode characters, with at most five cards.
+- Six-field lookup cards: id, source-labeled title, ranking points, summary, time, and a short verbatim quote. Each complete card is at most 120 Unicode characters, with at most five cards. Summaries shrink to share the unchanged budget; full originals are read separately. Ranking points are not probabilities.
 - Event-triggered working memory: messages, tasks, tool failures, visible activity hints, and explicit focus changes. Normal automatic context is capped at 800 characters; expanded or recovery context at 1800.
 - Versioned self-reports and situations, source attribution, nearby conversation windows, checkpoints, and one active owner per library.
 - Time-based fading without automatic raw-source deletion. Evidence-backed usage feedback can reinforce, correct, or invalidate a specific cue; exposure alone earns nothing.

@@ -34,6 +34,21 @@ test('主动切换注意点触发下步召回，不替旧任务宣称完成',asy
  const trigger=h.plugin.working.takeTrigger(lib.id,'old',99);assert.equal(trigger.kind,'task-switch');assert.match(trigger.query,/游戏/);assert.equal(h.plugin.store.tasks(lib.id).length,0)
  await assert.rejects(h.call('cm_working',{action:'focus',query:''}),{code:'INVALID_INPUT'});assert.equal(h.plugin.store.library(lib.id).error,null)
 })
+test('First pre-step recalls the newly claimed user message before it is persisted',async t=>{
+ const h=await harness(t,{workingMemory:{enabled:true}}),lib=await h.bind();h.event(h.a,'user/message',{id:'prior',source:{kind:'user'},content:'上一个无关话题'})
+ h.plugin.working.invalidate(lib.id,'old','manual-clear');const queries=[]
+ h.plugin.embedding.lookup=async(_l,_s,q)=>{queries.push(q);return {results:[],candidates:[]}}
+ const hook=h.listeners.get('agent/pre-step')[0],message={id:'current',source:{kind:'user'},content:[{type:'text',text:'还记得蓝色台灯的约定吗'}]}
+ await hook({agent:h.a,messages:[message],signal:new AbortController().signal},async()=>({kind:'enter',messages:[message]}))
+ assert.deepEqual(queries,['还记得蓝色台灯的约定吗']);assert.equal(h.plugin.working.frame(lib.id,'old').userKey,'message:current')
+ assert.equal(h.plugin.store.recent(lib.id).length,1)
+ h.event(h.a,'user/message',message);await h.pre();assert.equal(queries.length,1)
+})
+test('Ownership errors identify the current titled owner without granting another session access',async t=>{
+ const h=await harness(t),lib=await h.bind();h.event(h.a,'session/title',{title:'Synthetic main conversation'})
+ await assert.rejects(h.call('cm_library',{action:'bind',library_id:lib.id,expected_revision:1},h.b),e=>e.code==='HANDOFF_REQUIRED'&&e.message.includes('Synthetic main conversation'))
+ assert.equal(h.plugin.store.library(lib.id).owner,'old')
+})
 
 test('宿主工具线索变化接入召回队列，内部工具与普通鼠标操作不反复触发',async t=>{
  const h=await harness(t,{workingMemory:{enabled:true}}),lib=await h.bind(),hook=h.listeners.get('tools/execute')[0]
@@ -433,4 +448,11 @@ test('空闲向量维护会分批补齐，用户开始新轮后停止继续调�
  h.a.status='idle';await h.plugin.idleEmbedding(h.a)
  const until=Date.now()+1500;while(pending>0&&Date.now()<until)await new Promise(r=>setTimeout(r,20))
  assert.equal(pending,0);assert.equal(calls,3);await new Promise(r=>setTimeout(r,550));assert.equal(calls,3);assert.equal(h.plugin.store.library(lib.id).error,null)
+})
+test('Foreground pre-step cancels background embedding without pausing retrieval or blocking the turn',async t=>{
+ const h=await harness(t,{workingMemory:{enabled:true}}),lib=await h.bind();let started,signal
+ const entered=new Promise(r=>{started=r});h.plugin.embedding.warm=async(_l,_s,s)=>{signal=s;started();await new Promise((_r,reject)=>s.addEventListener('abort',()=>reject(Object.assign(Error('cancelled'),{code:'CANCELLED'})),{once:true}))}
+ h.plugin.embedding.lookup=async()=>({results:[],candidates:[]});h.emit('agent/status',{agent:h.a,status:'idle'});await entered
+ h.event(h.a,'user/message',{content:'现在查合成蓝色台灯'});await h.pre()
+ assert.equal(signal.aborted,true);assert.equal(h.plugin.embedding.health(lib.id).paused,false);assert.equal(h.plugin.store.library(lib.id).error,null)
 })

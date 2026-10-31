@@ -43,6 +43,14 @@ test('管理页可只读核对淡出与使用依据；不开模型、不允许�
  assert.equal((await f.api('memory-dynamics',{library_id:other,id})).error,'NOT_FOUND')
  assert.equal((await f.api('inspect',{library_id})).result.memory_dynamics.enabled,false);assert.equal(f.modelCalls(),0);assert.equal(store.record(library_id,id).text,'很早的记录')
 })
+test('Lightweight health reports owner, index progress and pending review without model calls or record writes',async t=>{
+ const f=await fixture(t),created=await f.api('create',{name:'Synthetic health'}),library_id=created.result.library.id
+ await f.api('bind',{library_id,session:f.agent.session.id,expected_revision:0})
+ f.agent.session.header.title='Synthetic owner title'
+ const store=f.plugin.store;store.append(library_id,{session:'history',seq:1,time:new Date().toISOString(),role:'user',text:'Synthetic source remains archived'})
+ const r=await f.api('health',{library_id});assert.equal(r.ok,true);assert.equal(r.result.library.owner_title,'Synthetic owner title');assert.equal(r.result.embedding.unprepared_records,1)
+ assert.deepEqual(r.result.recall_cards,[]);assert.equal(r.result.recovery.operations.length,0);assert.equal(f.modelCalls(),0);assert.equal(store.report(library_id).records,1)
+})
 test('管理页可查看情境索引、补建及语义候选，查询不会修改原文或情境',async t=>{
  const f=await fixture(t,{situationIndex:{enabled:true}}),created=await f.api('create',{name:'情境候选管理'}),library_id=created.result.library.id
  await f.api('bind',{library_id,session:f.agent.session.id,expected_revision:0})

@@ -22,6 +22,35 @@ async function fixture(t,{failEmbeds=false,stallTags=null,oversizedTags=false,me
  t.after(async()=>{embedding.close();store.close();server.closeAllConnections();await new Promise(r=>server.close(r));const target=resolve(dir),base=resolve(tmpdir());assert.ok(target.startsWith(base+sep)&&target.includes('continuity-vector-test-'));rmSync(target,{recursive:true,force:true})})
  return {store,embedding,posts:()=>posts,tags:()=>tags}
 }
+test('Projection upgrade rebuilds only affected bridge indexes and leaves source rows and other vectors intact',async t=>{
+ const f=await fixture(t),lib=f.store.create('projection migration');f.store.bind('owner',lib.id,0)
+ const dirty='[QQ · 私聊] Example：代理记得蓝色台灯\n（回 QQ：用 qq_bridge_send 工具）',bridge=f.store.append(lib.id,{session:'history',seq:1,time:'2026-10-31T00:00:00Z',role:'user',text:dirty,origin:{kind:'plugin:dsh-qq-bridge'}})
+ const clean=f.store.append(lib.id,{session:'history',seq:2,time:'2026-10-31T00:00:00Z',role:'assistant',text:'代理合成台灯，尚未购买'})
+ await f.embedding.warm(lib.id,'owner');const original=f.store.record(lib.id,bridge),saved=Buffer.from(f.store.db.prepare('SELECT value FROM cm_vectors WHERE rid=?').get(clean).value)
+ f.store.db.prepare('UPDATE cm_vector_chunks SET content=? WHERE rid=?').run(dirty,bridge);f.store.db.exec('DELETE FROM cm_retrieval_projection')
+ const migrated=new Embedding(f.store,{model:'fixture-embedding'})
+ try{
+  assert.deepEqual(f.store.record(lib.id,bridge),original);assert.equal(f.store.db.prepare('SELECT count(*) n FROM cm_vectors WHERE rid=?').get(bridge).n,0)
+  assert.deepEqual(Buffer.from(f.store.db.prepare('SELECT value FROM cm_vectors WHERE rid=?').get(clean).value),saved)
+  migrated.prepareChunks(lib.id);assert.equal(f.store.db.prepare('SELECT content FROM cm_vector_chunks WHERE rid=?').get(bridge).content,'代理记得蓝色台灯')
+  const plan=f.store.db.prepare('EXPLAIN QUERY PLAN SELECT 1 FROM cm_legacy_notes WHERE library=? AND rid=? AND active=0').all(lib.id,bridge).map(r=>r.detail).join(' ')
+  assert.match(plan,/cm_legacy_notes_source/)
+ }finally{migrated.close()}
+})
+test('Dialogue outranks equally relevant authored legacy notes, both keep distinguishable exact quotes',async t=>{
+ const f=await fixture(t),lib=f.store.create('source ranking');f.store.bind('owner',lib.id,0)
+ const file=f.store.append(lib.id,{session:'legacy-file',seq:1,time:'2026-10-31T00:00:00Z',role:'note',text:'代理的合成台灯是蓝色，仅为笔记',origin:{kind:'legacy-index-note',source:'authored-file'}})
+ const dialogue=f.store.append(lib.id,{session:'history',seq:1,time:'2026-10-31T00:00:00Z',role:'user',text:'代理的合成台灯是蓝色，这是原话'})
+ const r=await f.embedding.lookup(lib.id,'owner','代理合成台灯',5)
+ assert.equal(r.results[0].id,f.store.shortId(lib.id,dialogue));assert.match(r.results.find(c=>c.id===f.store.shortId(lib.id,file)).title,/旧文件/)
+ for(const c of r.results)assert.ok(f.store.record(lib.id,c.id).text.includes(c.quote))
+})
+test('Five verbose source cards still fit the whole response budget without losing verbatim quotes',async t=>{
+ const f=await fixture(t),lib=f.store.create('compact quotes');f.store.bind('owner',lib.id,0)
+ for(let i=0;i<5;i++)f.store.append(lib.id,{session:'history',seq:i,time:'2026-10-31T00:00:00Z',role:'user',text:'代理合成台灯的说明🌊'+i+'。'.repeat(200)})
+ const r=await f.embedding.lookup(lib.id,'owner','代理合成台灯',5);assert.equal(r.results.length,5);assert.ok(Array.from(JSON.stringify(r)).length<=650)
+ for(const c of r.results){assert.ok(Array.from(JSON.stringify(c)).length<=120);assert.ok(c.quote.length>=10);assert.ok(f.store.record(lib.id,c.id).text.includes(c.quote))}
+})
 
 test('取消排队立即返回，后续查询仍等待原操作，不并发穿透',async t=>{
  const {embedding}=await fixture(t);let release,enter,thirdRan=false
@@ -73,18 +102,18 @@ test('词命中的记录即使不在向量前60名，仍保留其有效向量准
  const result=await embedding.lookup(lib.id,'owner','代理',5);assert.ok(result.results.some(r=>r.id===target.slice(0,10)))
 })
 
-test('两个库隔离，混合检索返回五字段短卡，短ID可读原文',async t=>{
+test('两个库隔离，混合检索返回含原句的六字段短卡，短ID可读原文',async t=>{
  const {store,embedding}=await fixture(t),a=store.create('小黛'),b=store.create('别的伙伴');store.bind('s-a',a.id,0);store.bind('s-b',b.id,0)
  const rid=store.append(a.id,{session:'s-a',seq:1,time:'2026-10-28T00:00:00Z',role:'user',type:'user/message',text:'代理喜欢安静的小房间。',origin:{kind:'user'}})
  store.append(b.id,{session:'s-b',seq:1,time:'2026-10-28T00:00:00Z',role:'user',type:'user/message',text:'代理在别的库里。',origin:{kind:'user'}})
  const response=await embedding.lookup(a.id,'s-a','代理',5)
  assert.equal(response.results.length,1);assert.equal(response.results[0].id,rid.slice(0,10))
- assert.deepEqual(Object.keys(response.results[0]).sort(),['id','title','score','summary','time'].sort())
+ assert.deepEqual(Object.keys(response.results[0]).sort(),['id','title','score','summary','time','quote'].sort())
  assert.ok(Array.from(JSON.stringify(response.results[0])).length<=120)
  assert.ok(Array.from(JSON.stringify(response)).length<=700)
  assert.equal(store.read(a.id,response.results[0].id,0,2000).text,'代理喜欢安静的小房间。')
  assert.equal(store.read(a.id,response.results[0].id,0,2000).id,rid)
- assert.ok(Array.from(response.results[0].summary).length>=10)
+ assert.ok(response.results[0].summary);assert.ok(store.record(a.id,rid).text.includes(response.results[0].quote));assert.ok(response.results[0].quote.length>=10)
  assert.throws(()=>store.read(b.id,rid,0,2000),{code:'NOT_FOUND'})
 })
 
@@ -98,7 +127,7 @@ test('反馈只调整已准入候选排序；只读检索和读原文不强化�
  const result=await embedding.lookup(lib.id,'owner','代理导航配色',3,null,null,{readOnlyIndex:true,details:true})
  assert.equal(result.candidates.find(c=>c.id===id).auto_blocked,true);assert.equal(result.candidates.find(c=>c.id===id).semantic,before.candidates[0].semantic)
  assert.ok(result.results.find(r=>r.id===store.shortId(lib.id,id)).score<before.results[0].score)
- for(const card of result.results){assert.deepEqual(Object.keys(card).sort(),['id','title','score','summary','time'].sort());assert.ok(Array.from(JSON.stringify(card)).length<=120)}
+ for(const card of result.results){assert.deepEqual(Object.keys(card).sort(),['id','title','score','summary','time','quote'].sort());assert.ok(Array.from(JSON.stringify(card)).length<=120)}
  const count=store.db.prepare('SELECT count(*) n FROM cm_memory_feedback').get().n
  for(let i=0;i<3;i++){await embedding.lookup(lib.id,'owner','代理导航配色',3,null,null,{readOnlyIndex:true});store.read(lib.id,id,0,200)}
  assert.equal(store.db.prepare('SELECT count(*) n FROM cm_memory_feedback').get().n,count);assert.equal(store.record(lib.id,id).text,'代理的导航配色原来是蓝色。')

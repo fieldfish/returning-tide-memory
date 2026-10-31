@@ -1,5 +1,7 @@
 # Migration and rollback
 
+Version 0.3.5 adds a source-lookup index and a retrieval-projection migration marker. Known bridge envelope rows keep their original text, IDs, timestamps, provenance and digests. Only affected derived chunks/vectors are invalidated, then rebuilt incrementally. Pending/unprepared counts may temporarily increase; the manager explicitly reports this. Existing persona files and native conversation logs are outside this migration.
+
 Schema remains 3. New additive tables still require the corresponding code to maintain their source dependencies. An older implementation opening the same schema number is not equivalent behavior. First create a consistent snapshot and rehearse in a separate copy. Older schema upgrades create a pre-migration snapshot before changes.
 
 Version 0.3.1 is packaged as dsh-returning-tide-memory. The internal host identifier continuity-core, cm_* tools, and database application identifier remain stable. Do not load both old and new implementations against one live library. Replacing an active deployment requires explicit operator planning, saved native sessions, and reviewed pending operations.

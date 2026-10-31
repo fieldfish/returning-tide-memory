@@ -23,6 +23,19 @@ test('触发门：明确回忆、话题、继续；问候不自动搜',()=>{
   assert.equal(retrievalTrigger('昨天的小屋'), 'explicit-recall');assert.equal(retrievalTrigger('研究一下天文学'), 'topic')
   assert.equal(retrievalTrigger('继续'),'continuation');for(const q of ['你好','好','谢谢','晚安',''])assert.equal(retrievalTrigger(q),'skip')
 })
+test('A pending message ID survives persistence, clear does not suppress the next message',async t=>{
+ const f=fixture(t),id=f.append('蓝色小屋只有合成草稿');f.hit(id)
+ await f.prepare('蓝色小屋的旧草稿',10,{userSeq:null,userKey:'message:first',turnSeq:10})
+ await f.prepare('蓝色小屋的旧草稿',11,{userKey:'message:first',turnSeq:10});assert.equal(f.calls(),1)
+ f.working.invalidate(f.lib.id,'owner','manual-clear')
+ await f.prepare('蓝色小屋的旧草稿',11,{userKey:'message:first',turnSeq:10});assert.equal(f.calls(),1)
+ await f.prepare('蓝色小屋的旧草稿',12,{userKey:'message:second',turnSeq:12});assert.equal(f.calls(),2);assert.equal(f.working.frame(f.lib.id,'owner').status,'ready')
+})
+test('Incomplete index remains visible even when some admissible cards are ready',async t=>{
+ const f=fixture(t),id=f.append('蓝色小屋只有合成草稿');f.hit(id)
+ const result=await f.working.embedding.lookup(null,null,null,null,null,null,{readOnlyIndex:true,details:true});f.setAnswer({...result,incomplete:true,index:{indexed:8,pending:2,unprepared:1}})
+ await f.prepare();const view=f.working.view(f.lib.id,'owner');assert.equal(view.status,'ready');assert.equal(view.index_incomplete,true);assert.equal(view.index.pending,2)
+})
 
 test('已纠正的候选不自动带入；强化分数不能绕过语义准入门',async t=>{
  const f=fixture(t),id=f.append('导航配色曾用蓝色'),card={id:f.store.shortId(f.lib.id,id),title:'原文',score:999,summary:'导航配色曾用蓝色',time:'2026-10-29'}

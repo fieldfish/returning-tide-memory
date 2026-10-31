@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path'
 import {createRequire} from 'node:module'
 import {pathToFileURL} from 'node:url'
 import { ContinuityStore } from './lib/store.mjs'
-import { Capture } from './lib/capture.mjs'
+import { Capture, pendingUserMessage } from './lib/capture.mjs'
 import { Embedding } from './lib/embedding.mjs'
 import { Extraction, EXTRACTION_SYSTEM, normalizeUsage } from './lib/extraction.mjs'
 import {Evidence,EVIDENCE_SYSTEM} from './lib/evidence.mjs'
@@ -18,6 +18,7 @@ import {ContextFrame} from './lib/context-frame.mjs'
 import {Consolidation,CONSOLIDATION_SYSTEM} from './lib/consolidation.mjs'
 import {toolOutcome} from './lib/dsh-events.mjs'
 import {createManager} from './lib/manager.mjs'
+import {sessionTitle} from './lib/session-title.mjs'
 import { hash, fail, clip, page, integer, text } from './lib/util.mjs'
 
 export const name = 'continuity-core'
@@ -52,10 +53,11 @@ async function initializePlugin(ctx,config,options,resources){
   if(typeof isLoop!=='function') fail('HOST_API_UNAVAILABLE','需要 isAgentLoopRequest 以区分主模型和辅助调用')
   const store = new ContinuityStore(resolve(config.dataDirectory || join(process.env.DSH_HOME || join(homedir(),'.dsh'),'continuity-core')),options.storeOptions)
   resources.store=store
+  store.ownerLabel=id=>{const title=sessionTitle(ctx.agents.get(id));return title?title+' ('+id+')':id}
   const embedding=new Embedding(store,{legacySessionId:config.legacySessionId,memoryDynamics:config.memoryDynamics,...config.embedding}),capture = new Capture(store), held = new Map(), seen = new Map(), streams = new Set(), childStreams = new Map(), disposers = [], transfers = new Set()
   resources.embedding=embedding
   let closed = false
-  const lifecycle=new AbortController(),maintenanceTimers=new Map(),embeddingTimers=new Map()
+  const lifecycle=new AbortController(),maintenanceTimers=new Map(),embeddingTimers=new Map(),embeddingJobs=new Map()
   const administrativeHandlers=new Map()
   let manager=null
   const libraryFor = session => typeof session==='string' ? store.binding(session)?.library || null : null
@@ -164,11 +166,12 @@ async function initializePlugin(ctx,config,options,resources){
   }
   async function idleEmbedding(agent){
     const session=SID(agent),id=libraryFor(session)
-    if(closed||!id||agent.status!=='idle'||store.library(id).owner!==session||store.library(id).error||transfers.has(id)||hasRunningChildren(session))return
+    if(closed||!id||embeddingJobs.has(id)||agent.status!=='idle'||store.busy(id)||store.library(id).owner!==session||store.library(id).error||transfers.has(id)||hasRunningChildren(session))return
+    const controller=new AbortController(),signal=AbortSignal.any([lifecycle.signal,controller.signal]);embeddingJobs.set(id,controller)
     try{
-      if(!embedding.health(id).paused)try{await embedding.warm(id,session,lifecycle.signal)}catch(e){if(!closed){embedding.markFailure(id,e.code||'EMBEDDING_FAILED');ctx.logger?.warn?.('[continuity-core] 原文向量维护已暂停；聊天和原文采集可继续')}}
-      if(!closed&&agent.status==='idle'&&store.library(id).owner===session&&situationIndex.enabled&&!situationIndex.health(id).paused)try{await situationIndex.warm(id,session,lifecycle.signal)}catch(e){if(!closed)ctx.logger?.warn?.('[continuity-core] 情境向量维护已暂停；原文检索和聊天继续')}
-    }finally{scheduleEmbedding(agent)}
+      if(!embedding.health(id).paused)try{await embedding.warm(id,session,signal)}catch(e){if(!closed&&!signal.aborted){embedding.markFailure(id,e.code||'EMBEDDING_FAILED');ctx.logger?.warn?.('[continuity-core] 原文向量维护已暂停；聊天和原文采集可继续')}}
+      if(!closed&&!signal.aborted&&agent.status==='idle'&&store.library(id).owner===session&&situationIndex.enabled&&!situationIndex.health(id).paused)try{await situationIndex.warm(id,session,signal)}catch(e){if(!closed&&!signal.aborted)ctx.logger?.warn?.('[continuity-core] 情境向量维护已暂停；原文检索和聊天继续')}
+    }finally{if(embeddingJobs.get(id)===controller)embeddingJobs.delete(id);scheduleEmbedding(agent)}
   }
   function scheduleEmbedding(agent){
     if(closed)return
@@ -245,7 +248,7 @@ async function initializePlugin(ctx,config,options,resources){
       }finally{transfers.delete(lib.id)}
     }
     const {id}=owned(exec)
-    if(args.action==='embedding-resume')return {embedding:embedding.resume(id,session)}
+    if(args.action==='embedding-resume'){const health=embedding.resume(id,session);scheduleEmbedding(exec.agent);return {embedding:health}}
     if(args.action==='rename')return {library:store.rename(id,args.name,args.expected_revision)}
     if(args.action==='settings')return {library:store.settings(id,session,args.settings||{})}
     if(args.action==='resume'){store.resume(id,session);return {library:store.library(id)}}
@@ -263,7 +266,7 @@ async function initializePlugin(ctx,config,options,resources){
     if(a.action==='pause'||a.action==='resume'){execution.setPaused(id,session,a.task_id,a.action==='pause',a.expected_revision);return {task:execution.summary(id,a.task_id)}}
     if(a.action==='verify')return execution.verify(id,a.operation_session||session,a.call_id,{signal:e.signal})
   })
-  register('cm_lookup','本库本地向量与关键词混合检索；最多5条，每条只含id、标题、分数、摘要、时间且不超过120字符。只是候选；按id用cm_read核实原文。检索故障仅暂停向量维护，不锁聊天；修复后用cm_library embedding-resume。',object({query:str('查询'),limit:num('默认3，最多5')},['query']),async(a,e)=>{const{id,session}=owned(e);if(store.library(id).error)fail('LIBRARY_PAUSED','本库已暂停；核对故障后手动resume');try{const events=e.agent.session?.snapshotEvents?.()||[],turn=events.findLast(ev=>ev.type==='turn/start');return await embedding.lookup(id,session,a.query,a.limit??3,e.signal,turn?{session,fromSeq:turn.seq}:null)}catch(error){embedding.markFailure(id,error.code);throw error}})
+  register('cm_lookup','本库本地向量与关键词混合检索；最多5条，每条含id、来源标题、排序分、摘要、时间、quote原文短句且不超过120字符。排序分不是概率，quote只证明原话；按id用cm_read核实全文。检索故障不锁聊天，修复后用cm_library embedding-resume。',object({query:str('查询'),limit:num('默认3，最多5')},['query']),async(a,e)=>{const{id,session}=owned(e);if(store.library(id).error)fail('LIBRARY_PAUSED','本库已暂停；核对故障后手动resume');try{const events=e.agent.session?.snapshotEvents?.()||[],turn=events.findLast(ev=>ev.type==='turn/start');return await embedding.lookup(id,session,a.query,a.limit??3,e.signal,turn?{session,fromSeq:turn.seq}:null)}catch(error){embedding.markFailure(id,error.code);throw error}})
   register('cm_evidence','核验原文：supported/contradicted/insufficient。scope默认source，仅核对选定来源；current-state须给1—2个state_keys，自动补有效认可版本原文，at可选过去时点，只有旧版引用时保守返回未证实。引用含邻近原句与字符范围。额外调用模型，共用整理预算，需evidenceEnabled=true；失败不自动重试。',object({action:{type:'string',enum:['verify','status','resume']},query:str('核验问题'),ids:{type:'array',items:{type:'string'},description:'可选最多3个原文ID'},scope:{type:'string',enum:['source','current-state']},state_keys:{type:'array',items:{type:'string'},description:'current-state须给1—2个稳定认识键'},at:str('current-state可选含时区ISO过去时点')},[]),async(a,e)=>{
     const{id,session}=owned(e)
     if(a.action==='status')return {enabled:!!extraction.status(id)?.config.evidenceEnabled,...evidence.status(id)}
@@ -375,6 +378,7 @@ async function initializePlugin(ctx,config,options,resources){
     if(agent.session?.header?.parentSession)fail('SUBAGENT_NOT_ALLOWED','子代理不能取得这份库的运行权')
     store.assertOwner(id,session)
     if(transfers.has(id))fail('HANDOFF_IN_PROGRESS','记忆库交接中')
+    embeddingJobs.get(id)?.abort()
     const fresh=!held.has(session)
     if(fresh)held.set(session,{id,token:store.begin(id,session,'main')})
     try {
@@ -383,8 +387,12 @@ async function initializePlugin(ctx,config,options,resources){
       if(working.config.enabled){
         const user=store.db.prepare("SELECT seq,text FROM records WHERE library=? AND session=? AND role='user' ORDER BY seq DESC LIMIT 1").get(id,session)
         const events=agent.session?.snapshotEvents?.()||[],turn=events.findLast(ev=>ev.type==='turn/start'),turnSeq=turn?.seq??user?.seq??0
+        const incoming=pendingUserMessage(payload.messages)
+        const persisted=user?events.findLast(ev=>ev.type==='user/message'&&ev.seq===user.seq):null
+        const persistedId=(persisted?.data?.message||persisted?.data)?.id
+        const userKey=incoming?'message:'+(incoming.id||hash([turnSeq,incoming.text])):typeof persistedId==='string'?'message:'+persistedId:null
         const event=working.takeTrigger(id,session,turnSeq)
-        if(user||event)await working.prepare({library:id,session,query:event?.query||user.text,userSeq:user?.seq??turnSeq,turnSeq,signal,event})
+        if(incoming||user||event)await working.prepare({library:id,session,query:event?.query||incoming?.text||user?.text||'',userSeq:incoming?null:user?.seq??turnSeq,userKey,turnSeq,signal,event})
       }
       return decision
     }
@@ -425,8 +433,8 @@ async function initializePlugin(ctx,config,options,resources){
       if(event.type==='turn/end')releaseMain(session.id)
     }catch(e){store.pause(id,e.code||'CAPTURE_FAILED');notifyError(session.id,e.code||'CAPTURE_FAILED')}
   }
-  disposers.push(ctx.on('agent/created',({agent,source})=>{const id=libraryFor(SID(agent));if(id){if(source==='compact')store.markCompacted(SID(agent));attach(agent)}}))
-  disposers.push(ctx.on('agent/status',({agent,status})=>{if(status==='idle'){releaseMain(SID(agent));void idleExtraction(agent);void idleEmbedding(agent)}}))
+  disposers.push(ctx.on('agent/created',({agent,source})=>{const id=libraryFor(SID(agent));if(id){if(source==='compact')store.markCompacted(SID(agent));attach(agent);scheduleEmbedding(agent)}}))
+  disposers.push(ctx.on('agent/status',({agent,status})=>{if(status==='idle'){releaseMain(SID(agent));void idleExtraction(agent);void idleEmbedding(agent)}else{const id=libraryFor(SID(agent));if(id)embeddingJobs.get(id)?.abort()}}))
   disposers.push(ctx.on('agent/disposed',({agent})=>{releaseMain(SID(agent));toolContext.clear(SID(agent));const d=seen.get(agent)?.dispose;if(typeof d==='function')d();seen.delete(agent)}))
   // A child may perform a task, but only the parent owns this library and its recovery state.
   disposers.push(ctx.on('tools/execute',async(exec,next)=>{
@@ -459,7 +467,7 @@ async function initializePlugin(ctx,config,options,resources){
     if(streams.has(id)||(!auxiliary&&!isLoop(request)&&request.purpose!=='compaction')||(extracting&&busy?.kind!=='extract')||(consolidating&&(busy?.kind!=='consolidate'||!consolidation.jobs.has(id)))||(verifying&&(!evidence.jobs.has(id)||!['main','verify'].includes(busy?.kind))))fail('SECOND_MODEL_NOT_ALLOWED','同库只允许一个主模型或串行整理/核验调用')
     streams.add(id);try{yield*next()}finally{streams.delete(id)}
   },{prepend:true}))
-  for(const agent of ctx.agents.list?.()||[])attach(agent)
+  for(const agent of ctx.agents.list?.()||[]){attach(agent);scheduleEmbedding(agent)}
   try{if(config.manager?.enabled===true)manager=await createManager({store,execution,extraction,embedding,situations,situationIndex,activityArchive,working,consolidation,agents:ctx.agents,invoke:(name,args,exec)=>administrativeHandlers.get(name)(args,exec),port:config.manager.port??0})}
   catch(error){try{await dispose()}catch(cleanup){throw new AggregateError([error,cleanup],'插件初始化和清理均失败')}throw error}
   async function dispose(){

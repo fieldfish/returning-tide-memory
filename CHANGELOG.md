@@ -1,5 +1,14 @@
 # Changes
 
+## 0.3.5
+
+- Recall the newly claimed input before the first native model request; deduplicate by stable message identity after persistence. Preserve the existing request prefix.
+- Add a covering index for legacy source checks and avoid repeated status scans. Interrupt background vector work for foreground input; resume pending indexing after startup and explicit recovery.
+- Strip known QQ transport envelopes from retrieval projections only, and rebuild only affected derived indexes. Originals and persona files remain unchanged.
+- Add verbatim quote excerpts within the existing 120-character card / 650-character response budgets. Label dialogue, tools, authored legacy files and other notes separately; apply bounded source priors. Display ranking points, not confidence probabilities.
+- Make owner identity, incomplete indexing and pending-operation review prominent in both management languages. Operational indicators refresh without overwriting forms.
+- Keep chat and supported read-only diagnostics available during uncertain-write review; provide an actionable local manager command without exposing authentication. Never replay uncertain actions automatically.
+
 ## 0.3.4
 
 - Recognize a conservative literal-only shell diagnostic grammar and DSH working-directory reads during recovery. Read-only diagnostic interruptions do not quarantine later tools.
