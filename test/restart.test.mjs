@@ -15,6 +15,19 @@ function setup(t){
 }
 const call=(name,id='call')=>({type:'tool/call',data:{name,callId:id,arguments:{action:'send'}}})
 const result=(unknown=false,id='call')=>({type:'tool/result',data:{message:{toolCallId:id},...(unknown?{error:{code:'TOOL_OUTCOME_UNKNOWN'}}:{})}})
+test('interrupted literal shell diagnostics recover without quarantining later tools',t=>{
+ const f=setup(t);f.store.begin(f.lib.id,'owner','main')
+ f.store.recovery.observe(f.lib.id,'owner',{type:'tool/call',data:{name:'ops_bash',callId:'diagnostic',arguments:{command:'sleep 12; cat restart.log 2>/dev/null | tail -5; tasklist | grep -ci "DSH NEXT"'}}})
+ const s=f.reopen();assert.equal(s.recovery.needsReview(f.lib.id),false);assert.equal(s.library(f.lib.id).error,null);s.recovery.assertTool(f.lib.id,'qq_bridge_send',{})
+ assert.equal(s.db.prepare('SELECT readonly,status FROM cm_tool_operations WHERE call_id=?').get('diagnostic').readonly,1)
+})
+test('an uncertain outgoing action still allows literal reads and cwd inspection while blocking writes',t=>{
+ const f=setup(t);f.store.recovery.observe(f.lib.id,'owner',call('qq_bridge_send'));f.store.recovery.observe(f.lib.id,'owner',result(true))
+ const s=f.reopen();assert.equal(s.recovery.needsReview(f.lib.id),true)
+ s.recovery.assertTool(f.lib.id,'working_directory',{});s.recovery.assertTool(f.lib.id,'ops_bash',{command:'cat README.md'})
+ assert.throws(()=>s.recovery.assertTool(f.lib.id,'ops_bash',{command:'cat README.md > changed.txt'}),{code:'RECOVERY_REVIEW_REQUIRED'})
+ assert.throws(()=>s.recovery.assertTool(f.lib.id,'qq_bridge_send',{}),{code:'RECOVERY_REVIEW_REQUIRED'})
+})
 test('连续三次主对话中断重启仍能开始新轮，不改原文与owner',t=>{
  const f=setup(t);f.store.append(f.lib.id,{session:'owner',seq:1,time:new Date().toISOString(),role:'user',text:'must survive'})
  for(let i=0;i<3;i++){f.store.begin(f.lib.id,'owner','main');const s=f.reopen();assert.equal(s.library(f.lib.id).error,null);assert.equal(s.recovery.needsReview(f.lib.id),false);assert.equal(s.library(f.lib.id).owner,'owner');assert.equal(s.report(f.lib.id).records,1)}

@@ -1,5 +1,11 @@
 # Changes
 
+## 0.3.4
+
+- Recognize a conservative literal-only shell diagnostic grammar and DSH working-directory reads during recovery. Read-only diagnostic interruptions do not quarantine later tools.
+- Preserve review requirements for uncertain external writes, arbitrary shell execution, substitutions, executable search flags, and file redirections.
+- A working-memory deadline now affects that recall attempt instead of permanently pausing the shared embedding service. Later turns can retry.
+
 ## 0.3.3
 
 - Display current native session titles in the management selector and library ownership summary, keeping operation targets as stable IDs.

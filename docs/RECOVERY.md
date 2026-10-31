@@ -1,5 +1,9 @@
 # Recovery
 
+Literal-only diagnostic shell commands in a conservative supported subset, and working-directory reads with no cd argument, remain available while an external write awaits review. Unsupported shell syntax stays gated. Missing results from a recognized read-only diagnostic do not create an external-write quarantine after restart. Review never silently replays an old action.
+
+A working-memory recall deadline only makes that working set unavailable for the current attempt. It does not permanently pause the shared vector service. Actual backend failures remain visible and can require explicit recovery.
+
 A model transport failure ends the request without automatic retry and is not proof of library corruption. Embedding, situation indexing, correction indexing, activity capture, and background maintenance have independent health. Chat and raw archival can continue when optional recall is unavailable; tasks dependent on unknown old progress should wait for evidence.
 
 After repairing a service, resume the relevant feature explicitly. Activity resume only rescans existing native events. Correction resume discards derived cue vectors and rebuilds them during maintenance. Neither action replays prior desktop tools or sends messages.

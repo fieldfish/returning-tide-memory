@@ -103,6 +103,14 @@ test('自动召回超时后迟到结果不写回，记录原文不受影响',asy
   finish({results:[],candidates:[{id,semantic:1,lexical:true}]});await new Promise(r=>setImmediate(r))
   assert.equal(f.working.status(f.lib.id,'owner').frame.status,'unavailable');assert.equal(f.store.report(f.lib.id).records,1)
 })
+test('a working-memory deadline does not pause the embedding service and the next turn can recall',async t=>{
+ const f=fixture(t,{timeoutMs:100});let failures=0
+ f.working.embedding.markFailure=()=>{failures++};f.setAnswer(()=>new Promise(()=>{}))
+ const id=f.append('Synthetic recall source');await f.prepare('Recall synthetic source',10)
+ assert.equal(f.working.status(f.lib.id,'owner').frame.error,'AUTO_RECALL_TIMEOUT');assert.equal(failures,0)
+ f.hit(id);await f.prepare('Recall synthetic source',11);assert.equal(f.working.status(f.lib.id,'owner').frame.status,'ready')
+ assert.equal(f.store.record(f.lib.id,id).text,'Synthetic recall source')
+})
 test('关停和跨会话归属变化后不注入旧工作集',async t=>{
   const f=fixture(t),id=f.append('蓝色小屋');f.hit(id);await f.prepare();const rev=f.store.library(f.lib.id).revision
   f.store.transfer(f.lib.id,'owner','next',rev);assert.equal(f.working.context(f.lib.id,'owner'),'')
