@@ -1,5 +1,12 @@
 # Changes
 
+## 0.3.8
+
+- Preserve the native result or original error when an in-flight tool completes after the memory plugin unloads; do not touch the closed old journal or replace the outcome with a database error.
+- On the next step after reload/restart, reconcile a previously unrecorded explicit native success only when session, call ID, tool name, argument digest, native ordering and available source links match. Never replay the operation.
+- Keep genuinely missing results, recorded unknown failures, conflicting duplicate evidence and completed human reviews unchanged. Persist native call references and bound recovery scans; unchanged checks do not rescan full history each round.
+- Add isolated actual-host unload, same-session persistence/restart and repeat-reload verification, with a genuine unknown-result control and exactly one synthetic effect.
+
 ## 0.3.7
 
 - Separate native unread/missing-file edits, missing or ambiguous literal matches, invalid edit/write arguments, unread overwrite refusals, and genuinely absent tools from unknown outcomes using native identity and stage evidence. A custom tool reporting the same error code does not inherit proof; unavailable registry lookups fail closed. Keep actual started-write interruptions for human review.

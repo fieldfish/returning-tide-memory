@@ -603,3 +603,22 @@ test('a schema validation failure is proof only when the host validator returns 
   assert.equal(h.plugin.store.recovery.needsReview(lib.id),expected==='uncertain')
  }
 })
+
+test('unloading during a tool does not replace its later result with a closed-database error',async t=>{
+ for(const expected of [{isError:false,content:[{type:'text',text:'Synthetic applied result'}]},{isError:true,error:{info:{name:'SyntheticToolError',code:'TIMEOUT'}},content:[{type:'text',text:'Synthetic native failure'}]}]){
+  const h=await harness(t),lib=await h.bind(),target=join(h.directory,'reload-result.txt');let release,started
+  const waiting=new Promise(resolve=>{release=resolve}),entered=new Promise(resolve=>{started=resolve})
+  const pending=runTool(h,toolExec(h,'synthetic_write','reload-result'),async()=>{writeFileSync(target,'synthetic effect');started();await waiting;return expected})
+  await entered;await h.plugin.dispose();release()
+  assert.equal(await pending,expected,'the native result must reach the host unchanged after unload')
+  assert.equal(readFileSync(target,'utf8'),'synthetic effect')
+ }
+})
+
+test('unloading during a throwing tool preserves the original host error',async t=>{
+ const h=await harness(t);await h.bind();let release,started
+ const waiting=new Promise(resolve=>{release=resolve}),entered=new Promise(resolve=>{started=resolve}),expected=new Error('Synthetic original tool failure')
+ const pending=runTool(h,toolExec(h,'synthetic_write','reload-throw'),async()=>{started();await waiting;throw expected})
+ await entered;await h.plugin.dispose();release()
+ await assert.rejects(pending,error=>error===expected)
+})

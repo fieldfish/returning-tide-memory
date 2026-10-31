@@ -57,3 +57,12 @@ The journal distinguishes a host-proven pre-effect native edit-intent refusal fr
 An authenticated local human can acknowledge one older `uncertain` item during an active request. This changes only review metadata, keeps the current request lease, does not acknowledge a still-`running` operation, and never replays a tool. Other configuration, ownership transfer, retry permission and verification actions retain their own guards. This does not disable DSH's independent host approval policy. Existing historical unknown outcomes are not automatically cleared on upgrade.
 
 Pending rows refresh with the health indicators; their drafts remain scoped to the library and operation. The page shows recorded time, failure code and stage where known, without exposing raw arguments or credentials. A normal tool refusal no longer becomes a global unknown-write hold through these verified native paths; a genuinely unknown started write still needs human review.
+
+
+## Reload and restart result reconciliation
+
+An old tools/execute observer can outlive plugin disposal. Once disposed it passes the actual native tool result or original exception through, instead of writing to its closed database. The durable unfinished operation remains unresolved until there is trustworthy outcome evidence.
+
+Before a subsequent main step, the owner session can reconcile an unrecorded native success. Admission requires the same library/session, call ID, tool name and canonical argument digest; an exact call position when recorded; a later explicit non-error tool-role result from the native tool source; and matching sourceEventSeqs when present. Conflicting duplicate calls/results, wrong roles, changed arguments, replaced projections and mismatched source links are not accepted. This restores the host-reported result, not independent proof of an external fact.
+
+Only uncertain operations without any previously recorded result digest are eligible. Recorded unknown failures and completed human decisions are never overwritten. A genuinely absent result still requires human review. No tool is replayed, no model is called, no source/persona is rewritten and the new main request lease remains held. Recovery checks at most 32 candidate operations and 8192 native events per scan; old or unverifiable material remains available for explicit review. Completed attempts are cached per loaded session and reconsidered when relevant new native result evidence arrives.

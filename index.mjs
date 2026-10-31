@@ -403,7 +403,7 @@ async function initializePlugin(ctx,config,options,resources){
     const fresh=!held.has(session)
     if(fresh)held.set(session,{id,token:store.begin(id,session,'main')})
     try {
-      signal?.throwIfAborted();capture.backfill(id,agent.session);attach(agent);const decision=await next()
+      signal?.throwIfAborted();execution.reconcileNativeResults(id,agent.session);capture.backfill(id,agent.session);attach(agent);const decision=await next()
       if(decision.kind!=='enter'){if(fresh)releaseMain(session);return decision}
       if(working.config.enabled){
         const user=store.db.prepare("SELECT seq,text FROM records WHERE library=? AND session=? AND role='user' ORDER BY seq DESC LIMIT 1").get(id,session)
@@ -510,8 +510,16 @@ async function initializePlugin(ctx,config,options,resources){
     const call={callId:exec.callId,name:exec.name,arguments:exec.arguments}
     execution.start(managed,session,call)
     const failureRecall=()=>{if(!/^cm_/.test(exec.name||'')){const owner=parent?.session||session;working.signalEvent(managed,owner,'tool-failure',exec.callId||exec.name,'工具 '+clip(exec.name,100)+' 失败；核对过去相同工具的错误、处理办法与当前任务')}}
-    try{const result=await next();execution.complete(managed,session,exec.callId,result,{trust:trust()});if(toolOutcome(result).isError)failureRecall();else if(id)try{toolContext.observe(managed,session,exec.name,exec.arguments)}catch(error){store.log(managed,'tool-context-hint-failed',{code:error.code||'CONTEXT_HINT_FAILED',main_chat_blocked:false})}return result}
-    catch(error){execution.complete(managed,session,exec.callId,{error:{code:error.code,message:'Host tool execution failed'}},{thrown:true,trust:trust()});failureRecall();throw error}
+    let result
+    try{result=await next()}
+    catch(error){if(!closed){execution.complete(managed,session,exec.callId,{error:{code:error.code,message:'Host tool execution failed'}},{thrown:true,trust:trust()});failureRecall()}throw error}
+    // Hot unload can finish while the host tool is still running. Preserve its actual outcome;
+    // the next instance can reconcile a source-matched native result, without replaying a tool.
+    if(closed)return result
+    execution.complete(managed,session,exec.callId,result,{trust:trust()})
+    if(toolOutcome(result).isError)failureRecall()
+    else if(id)try{toolContext.observe(managed,session,exec.name,exec.arguments)}catch(error){store.log(managed,'tool-context-hint-failed',{code:error.code||'CONTEXT_HINT_FAILED',main_chat_blocked:false})}
+    return result
   },{prepend:true}))
   disposers.push(ctx.on('llm/stream',async function*(request,next){
     const session=request.sessionId,id=libraryFor(session)
