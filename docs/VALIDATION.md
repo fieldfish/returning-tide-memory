@@ -23,6 +23,12 @@ To reproduce the complete native failure matrix, set DSH_SDK_RUNTIME to an exist
 
 ## 0.3.8 interruption recovery stage
 
+Release note: the local validation below passed, but the original 0.3.8 shared Windows CI exposed a timing-dependent idle-maintenance test failure. That release is marked prerelease; 0.3.9 repairs the test timing without changing runtime code.
+
 422/422 tests pass with no skips in the tested Windows SDK environment. New regressions reproduce unloading during a successful/failed/throwing tool, missed persisted successes after restart, genuine missing outcomes, changed arguments, incorrect source citations, user-authored or contradictory envelopes, late results after reload, scan caching and preservation of completed human review. The earlier 17-case independent review, native refusal matrix, tool schemas and bilingual UI are rechecked for the release package.
 
 Set DSH_SDK_RUNTIME to an installed runtime directory and run npm run test:reload-recovery. The isolated actual-host test completes one synthetic local effect while unloading the memory plugin, persists a valid native call/result lifecycle, restarts the host into the same session, reconciles that exact result and reloads again without a new acknowledgement. It preserves a separate truly unknown operation, the original source and session ownership, and verifies exactly one effect and zero dialogue-model calls. The lifecycle is synthetic and uses official SDK message/event constructors; no live companion is contacted. Unrelated host UI stalls and arbitrary third-party execution semantics are not proven resolved by this test.
+
+## 0.3.9 CI timing hotfix
+
+422/422 local tests pass with the optional SDK enabled. The idle-maintenance test now advances real scheduler callbacks with a controlled clock, asserts that every batch completes, and verifies that pause prevents further model calls. An isolated mutation that removes continuation fails this same test, confirming the fix does not hide a broken scheduler. The runner executes all test files with two concurrent workers. Runtime source files are unchanged from 0.3.8; the earlier native-host and UI evidence applies to that identical runtime, rather than being claimed as newly repeated.

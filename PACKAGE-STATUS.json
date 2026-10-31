@@ -1,7 +1,7 @@
 {
   "project": "Returning Tide Memory",
   "package": "dsh-returning-tide-memory",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "license": "MIT",
   "schema": 3,
   "offline_tests": 422,

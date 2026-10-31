@@ -434,13 +434,17 @@ test('空闲整理能持续分批推进，不必每批再发一条消息；暂�
  const h=await harness(t),lib=await h.bind();h.plugin.embedding.warm=async()=>({skipped:'synthetic-test'})
  for(let i=0;i<6;i++)h.event(h.a,'user/message',{content:'有来源的合成记录。'.repeat(20)})
  let calls=0;h.ctx.llm.prepareCall=async()=>{calls++;return {config:{},retryPolicy:{mode:'normal',maxRetries:0},stream:async function*(){yield {type:'text-delta',text:'{"items":[]}'};yield {type:'finish',reason:{kind:'stop'}}}}}
+ t.mock.timers.enable({apis:['setTimeout']})
  h.plugin.extraction.configure(lib.id,'old',{source:'dsh',provider:'p',model:'m',minIntervalMs:0,maxInputChars:1100})
  h.plugin.extraction.resume(lib.id,'old');h.emit('agent/status',{agent:h.a,status:'idle'})
  const last=h.plugin.store.db.prepare('SELECT MAX(rowid) n FROM records WHERE library=?').get(lib.id).n
- const stop=Date.now()+1500
- while(h.plugin.extraction.status(lib.id).cursor<last&&Date.now()<stop)await new Promise(r=>setTimeout(r,10))
+ // Exercise the real scheduling callbacks, without making progress depend on a busy CI machine's
+ // wall-clock speed. A missing continuation still exhausts the bounded tick loop and fails below.
+ for(let ticks=0;ticks<128&&h.plugin.extraction.status(lib.id).cursor<last;ticks++){t.mock.timers.tick(25);await settle()}
  assert.equal(h.plugin.extraction.status(lib.id).cursor,last);assert.ok(calls>1)
- h.plugin.extraction.pause(lib.id);h.event(h.a,'user/message',{content:'暂停后不应调用'});h.emit('agent/status',{agent:h.a,status:'idle'});await new Promise(r=>setTimeout(r,40));const count=calls;assert.ok(count>1);assert.equal(h.plugin.extraction.status(lib.id).paused,true)
+ h.plugin.extraction.pause(lib.id);const count=calls;h.event(h.a,'user/message',{content:'暂停后不应调用'});h.emit('agent/status',{agent:h.a,status:'idle'})
+ for(let ticks=0;ticks<4;ticks++){t.mock.timers.tick(500);await settle()}
+ assert.equal(calls,count,'暂停后不得再调用整理模型');assert.equal(h.plugin.extraction.status(lib.id).cursor,last);assert.equal(h.plugin.extraction.status(lib.id).paused,true)
 })
 
 test('认可候选兼容真实模型使用expected_revision的参数；冲突别名拒绝',async t=>{

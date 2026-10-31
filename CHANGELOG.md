@@ -1,5 +1,11 @@
 # Changes
 
+## 0.3.9
+
+- Make the idle-maintenance continuation test advance the real scheduling callbacks with a controlled clock instead of a 1.5-second wall-clock deadline. Preserve completion assertions and additionally verify that pausing prevents further model calls.
+- Limit concurrent SQLite-heavy test workers to two so slower Windows CI runners do not contend for every CPU's disk access. All test files still run.
+- Runtime memory, recovery, retrieval, persona and session behavior are unchanged from 0.3.8. The test-only hotfix addresses its failed CI timing check; it does not claim new runtime repairs.
+
 ## 0.3.8
 
 - Preserve the native result or original error when an in-flight tool completes after the memory plugin unloads; do not touch the closed old journal or replace the outcome with a database error.
