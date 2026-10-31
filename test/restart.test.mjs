@@ -66,7 +66,7 @@ test('首次升级遇到旧版活动轮，无法追踪其副作用时保守核�
 test('旧版中断标记迁移为可对话的待核查项，不能绕过写操作保护',t=>{
  const f=setup(t);f.store.pause(f.lib.id,'PREVIOUS_PROCESS_INTERRUPTED')
  const s=f.reopen();assert.equal(s.library(f.lib.id).error,null);assert.equal(s.recovery.needsReview(f.lib.id),true)
- assert.match(s.recovery.context(f.lib.id),/继续对话/);assert.throws(()=>s.recovery.assertTool(f.lib.id,'cm_self',{action:'propose'}),{code:'RECOVERY_REVIEW_REQUIRED'})
+ assert.match(s.recovery.context(f.lib.id),/继续对话/);assert.doesNotThrow(()=>s.recovery.assertTool(f.lib.id,'cm_self',{action:'propose'}));assert.throws(()=>s.recovery.assertTool(f.lib.id,'write',{}),{code:'RECOVERY_REVIEW_REQUIRED'})
  const pending=s.recovery.pending(f.lib.id).legacy[0]
  s.recovery.resolve(f.lib.id,{legacy_id:pending.id,decision:'abandon-no-replay',note:'Human chooses not to replay old task'})
  assert.equal(s.recovery.needsReview(f.lib.id),false)

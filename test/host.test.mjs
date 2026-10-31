@@ -28,6 +28,16 @@ async function harness(t,config={}) {
   return {directory,tools,listeners,agents,contexts,ctx,plugin,call,emit,pre,event,bind,a,b,c,agent,errors}
 }
 
+test('registered claim-link actions pair sources, expose evidence and invalidate only the working frame',async t=>{
+ const h=await harness(t),lib=await h.bind(),store=h.plugin.store
+ const append=(seq,text)=>store.append(lib.id,{session:'history',seq,time:new Date(Date.UTC(2026,0,1,0,seq)).toISOString(),role:'user',text})
+ const a=append(1,'Old choice.'),b=append(2,'New choice.'),c=append(3,'That association was mistaken.')
+ const linked=await h.call('cm_working',{action:'link',id:a,target_id:b,relation:'changed',subject:'synthetic-speaker',topic:'choice',scope:'example',source_quote:'Old choice.',target_quote:'New choice.',reason:'Attributed synthetic change'})
+ const status=await h.call('cm_working',{action:'link-status',id:a,limit:3000});assert.equal(JSON.parse(status.relations.text).groups[0].after,'New choice.')
+ await h.call('cm_working',{action:'link-retract',link_id:linked.relation.id,refs:[c],reason:'Later evidence retracts association'})
+ assert.equal(h.plugin.embedding.claimLinks.resolve(lib.id,[a]).groups.length,0);assert.equal(store.report(lib.id).records,3)
+})
+
 test('主动切换注意点触发下步召回，不替旧任务宣称完成',async t=>{
  const h=await harness(t,{workingMemory:{enabled:true}}),lib=await h.bind();h.event(h.a,'user/message',{content:'先做网页，再去游戏'})
  const r=await h.call('cm_working',{action:'focus',query:'先接着游戏的上次进度'});assert.equal(r.recall_scheduled,true)

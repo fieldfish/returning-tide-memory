@@ -9,6 +9,7 @@ import {Situations} from '../lib/situations.mjs'
 import {WorkingMemory} from '../lib/working-memory.mjs'
 import {ContextFrame} from '../lib/context-frame.mjs'
 import {ExecutionLedger} from '../lib/execution.mjs'
+import {ClaimLinks} from '../lib/claim-links.mjs'
 
 function fixture(t){
   const dir=mkdtempSync(join(tmpdir(),'continuity-frame-test-')),store=new ContinuityStore(dir),lib=store.create('合成预算测试');store.bind('owner',lib.id,0)
@@ -21,6 +22,25 @@ function fixture(t){
   t.after(()=>{working.close();store.close();const target=resolve(dir);assert.ok(target.startsWith(resolve(tmpdir())+sep)&&target.includes('continuity-frame-test-'));rmSync(target,{recursive:true,force:true})})
   return {store,lib,scenes,situations,execution,working,context,append,hit,render,parse}
 }
+
+test('a previously prepared working frame revalidates new claim links without rereading the whole archive',async t=>{
+ const f=fixture(t),a=f.append('以前用蓝色。'),b=f.append('后来改用绿色。'),links=new ClaimLinks(f.store)
+ f.store.markRestored('owner');f.working.embedding.claimLinks=links;f.hit(a)
+ await f.working.prepare({library:f.lib.id,session:'owner',query:'以前用的颜色',userSeq:99,turnSeq:99})
+ assert.equal(f.parse().relations,undefined)
+ links.record(f.lib.id,'owner',{id:a,target_id:b,relation:'changed',subject:'speaker',topic:'palette',scope:'room',source_quote:'以前用蓝色',target_quote:'后来改用绿色',reason:'Attributed synthetic change'})
+ const rendered=f.render();assert.ok(Array.from(rendered).length<=800);assert.equal(f.parse().relations.items[0].after,'后来改用绿色')
+ const view=f.working.context(f.lib.id,'owner');assert.ok(Array.from(view).length<=1800);assert.match(view,/后来改用绿色/)
+ f.store.db.prepare('DELETE FROM records WHERE id=?').run(b);assert.equal(f.parse().relations,undefined)
+})
+
+test('recovery guard and claim relationships share the hard context budget',async t=>{
+ const f=fixture(t),a=f.append('旧'.repeat(100)),b=f.append('新'.repeat(100)),links=new ClaimLinks(f.store);f.working.embedding.claimLinks=links;f.hit(a)
+ links.record(f.lib.id,'owner',{id:a,target_id:b,relation:'disputed',subject:'s'.repeat(80),topic:'t'.repeat(100),scope:'c'.repeat(100),source_quote:'旧'.repeat(100),target_quote:'新'.repeat(100),reason:'Unresolved synthetic dispute'})
+ f.store.db.prepare('INSERT INTO cm_tool_operations(library,session,call_id,name,args_digest,readonly,status,time) VALUES(?,?,?,?,?,?,?,?)').run(f.lib.id,'owner','pending','synthetic_send','synthetic',0,'uncertain',Date.now())
+ await f.working.prepare({library:f.lib.id,session:'owner',query:'以前的争议',userSeq:99,turnSeq:99})
+ const rendered=f.render();assert.ok(Array.from(rendered).length<=1800);assert.ok(f.parse().relations);assert.equal(f.parse().relations.items[0].kind,'disputed')
+})
 test('所有自动材料共用1800字符，根状态、恢复、短卡、任务不会叠加超额',async t=>{
   const f=fixture(t),id=f.append('历史原文'.repeat(500)),s=f.situations.create(f.lib.id,'owner',{title:'当前视频',refs:[id]});f.situations.focus(f.lib.id,'owner',s.id)
   for(let n=0;n<8;n++)f.store.propose(f.lib.id,{key:'根'+n,kind:'identity',body:'有出处的自我认识'.repeat(50),reason:'测试',refs:[id]},true)

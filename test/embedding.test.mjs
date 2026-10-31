@@ -22,6 +22,15 @@ async function fixture(t,{failEmbeds=false,stallTags=null,oversizedTags=false,me
  t.after(async()=>{embedding.close();store.close();server.closeAllConnections();await new Promise(r=>server.close(r));const target=resolve(dir),base=resolve(tmpdir());assert.ok(target.startsWith(base+sep)&&target.includes('continuity-vector-test-'));rmSync(target,{recursive:true,force:true})})
  return {store,embedding,posts:()=>posts,tags:()=>tags}
 }
+
+test('retrieving only the old claim brings its attributed later change within the compact budget',async t=>{
+ const f=await fixture(t),lib=f.store.create('Synthetic paired lookup');f.store.bind('owner',lib.id,0)
+ const a=f.store.append(lib.id,{session:'history',seq:1,time:'2026-10-30T00:00:00Z',role:'user',text:'代理台灯选蓝色，其他事项照旧。'}),b=f.store.append(lib.id,{session:'history',seq:2,time:'2026-10-31T00:00:00Z',role:'user',text:'现在改选绿色，别的事情没变。'})
+ f.embedding.claimLinks.record(lib.id,'owner',{id:a,target_id:b,relation:'changed',subject:'synthetic-speaker',topic:'lamp-color',scope:'room-lamp',source_quote:'台灯选蓝色',target_quote:'现在改选绿色',reason:'Attributed preference change'})
+ const response=await f.embedding.lookup(lib.id,'owner','代理台灯蓝色',1)
+ assert.equal(response.results[0].id,f.store.shortId(lib.id,a));assert.match(response.relations[0].after,/绿色/);assert.equal(response.relations[0].to,f.store.shortId(lib.id,b));assert.ok(Array.from(JSON.stringify(response)).length<=650)
+ assert.deepEqual(Object.keys(response.results[0]).sort(),['id','title','score','summary','time','quote'].sort())
+})
 test('Projection upgrade rebuilds only affected bridge indexes and leaves source rows and other vectors intact',async t=>{
  const f=await fixture(t),lib=f.store.create('projection migration');f.store.bind('owner',lib.id,0)
  const dirty='[QQ · 私聊] Example：代理记得蓝色台灯\n（回 QQ：用 qq_bridge_send 工具）',bridge=f.store.append(lib.id,{session:'history',seq:1,time:'2026-10-31T00:00:00Z',role:'user',text:dirty,origin:{kind:'plugin:dsh-qq-bridge'}})

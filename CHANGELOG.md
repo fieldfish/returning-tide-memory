@@ -1,5 +1,11 @@
 # Changes
 
+## 0.3.6
+
+- Recognize native grep/glob and literal-only PowerShell diagnostics during recovery; migrate historical read-only misclassifications without replay. Evidence-backed local memory edits and checkpoint saves remain available; normal operation adds no plugin tool-approval gate.
+- Add attributed changed/corrected/disputed/contextual claim links, evidenced retraction, bounded chain traversal, branch warnings, accepted-state version pairs, and a narrow unresolved preference-conflict cue. No general automatic truth adjudication.
+- Bring linked before/after evidence into lookup and freshly revalidated working memory within existing compact budgets. Raw sources, persona files, native chat and ownership are preserved.
+
 ## 0.3.5
 
 - Recall the newly claimed input before the first native model request; deduplicate by stable message identity after persistence. Preserve the existing request prefix.

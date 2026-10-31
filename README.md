@@ -21,6 +21,9 @@ It does not rewrite persona files. A retrieved passage is a candidate, not proof
 - Explicit recovery for uncertain external actions; local transactional control errors do not become unresolved external side effects.
 - Local management UI, independent feature health, incremental idle maintenance, shared model budgets, consistent snapshots, and restore into a new unbound copy.
 
+- Attributed before/after claim links: changes, corrections, unresolved disputes and context differences return together with source pointers; accepted state versions are paired automatically. Links do not certify facts. See [API and limits](docs/API.md).
+- Recovery recognizes native `grep`/`glob`, literal read-only `pwsh`, and evidence-backed local memory edits. Normal tool use adds no plugin approval gate; host permissions still apply.
+
 ## Requirements
 
 Node >=22.13, a compatible DSH host, and local Ollama with qwen3-embedding:0.6b. The tested host environment is documented in docs/VALIDATION.md. Model weights, DSH itself, account credentials, and user libraries are not bundled.
