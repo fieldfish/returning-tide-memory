@@ -58,7 +58,19 @@ test('Five verbose source cards still fit the whole response budget without losi
  const f=await fixture(t),lib=f.store.create('compact quotes');f.store.bind('owner',lib.id,0)
  for(let i=0;i<5;i++)f.store.append(lib.id,{session:'history',seq:i,time:'2026-10-31T00:00:00Z',role:'user',text:'代理合成台灯的说明🌊'+i+'。'.repeat(200)})
  const r=await f.embedding.lookup(lib.id,'owner','代理合成台灯',5);assert.equal(r.results.length,5);assert.ok(Array.from(JSON.stringify(r)).length<=650)
- for(const c of r.results){assert.ok(Array.from(JSON.stringify(c)).length<=120);assert.ok(c.quote.length>=10);assert.ok(f.store.record(lib.id,c.id).text.includes(c.quote))}
+ for(const c of r.results){assert.ok(Array.from(JSON.stringify(c)).length<=120);assert.ok(c.summary.length>=10,'a fitting card keeps a judgeable summary');assert.ok(c.quote.length>=10);assert.ok(f.store.record(lib.id,c.id).text.includes(c.quote))}
+})
+test('关系元数据挤压预算时整张卡片少返回，而不是把摘要压成一两个字',async t=>{
+ const f=await fixture(t),lib=f.store.create('compact relations');f.store.bind('owner',lib.id,0)
+ const ids=[]
+ for(let i=0;i<4;i++)ids.push(f.store.append(lib.id,{session:'history',seq:i,time:'2026-10-31T00:00:00Z',role:'user',text:'代理合成台灯的说明🌊'+i+'。'.repeat(200)}))
+ f.embedding.claimLinks.record(lib.id,'owner',{id:ids[0],target_id:ids[1],relation:'changed',subject:'synthetic-speaker',topic:'lamp-color',scope:'room-lamp',source_quote:'台灯的说明',target_quote:'台灯的说明',reason:'Synthetic attributed change within the same verbose text'})
+ const r=await f.embedding.lookup(lib.id,'owner','代理合成台灯',4)
+ assert.ok(Array.from(JSON.stringify(r)).length<=650)
+ assert.ok(r.relations?.length,'relationship metadata remains attributable')
+ assert.ok(r.results.length>=1&&r.results.length<4,'whole cards are dropped before cards become meaningless')
+ assert.match(r.note,/预算内\d+条/)
+ for(const c of r.results){assert.ok(Array.from(JSON.stringify(c)).length<=120);assert.ok(c.summary.length>=10);assert.ok(c.quote.length>=10);assert.ok(f.store.record(lib.id,c.id).text.includes(c.quote))}
 })
 
 test('取消排队立即返回，后续查询仍等待原操作，不并发穿透',async t=>{

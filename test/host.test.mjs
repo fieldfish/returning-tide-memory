@@ -1,14 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync,rmSync } from 'node:fs'
+import { mkdtempSync,rmSync,writeFileSync,readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {createServer} from 'node:http'
 import { createPlugin } from '../index.mjs'
 
 const settle=()=>new Promise(r=>setImmediate(r))
-async function harness(t,config={}) {
+async function harness(t,config={},options={}) {
   const directory=mkdtempSync(join(tmpdir(),'continuity-host-test-')),tools=new Map(),listeners=new Map(),agents=new Map(),contexts=new Map(),errors=[]
+  const definitions=new Map(Object.entries(options.definitions||{})),scopedTools=new Map()
   function agent(id) {
     const events=[]
     const a={id,status:'idle',options:{},session:{id,header:{},snapshotEvents:(from=0)=>events.filter(e=>e.seq>=from)},ctx:{systemPrompt:{context:spec=>{const key=spec.name==='continuity-core:recovery'?id:id+':'+spec.name;contexts.set(key,spec);return()=>contexts.delete(key)}}},events,
@@ -16,16 +17,16 @@ async function harness(t,config={}) {
     agents.set(id,a);return a
   }
   const a=agent('old'),b=agent('new'),c=agent('other')
-  const ctx={tools:{register:s=>{tools.set(s.name,s);return()=>tools.delete(s.name)}},agents:{get:id=>agents.get(id),list:()=>[...agents.values()]},sessions:{flush:async()=>{}},llm:{prepareCall:async cfg=>({config:cfg,retryPolicy:{mode:'normal',maxRetries:0},stream:async function*(){yield {type:'text-delta',text:'{"items":[]}'};yield {type:'usage',usage:{inputTokens:30,outputTokens:5}};yield {type:'finish',reason:{kind:'stop'}}}})},
+  const ctx={tools:{register:s=>{tools.set(s.name,s);return()=>tools.delete(s.name)},get:(name,scope)=>{const scoped=scopedTools.get(scope)?.get(name);return scoped!==undefined?scoped:definitions.get(name)}},agents:{get:id=>agents.get(id),list:()=>[...agents.values()]},sessions:{flush:async()=>{}},llm:{prepareCall:async cfg=>({config:cfg,retryPolicy:{mode:'normal',maxRetries:0},stream:async function*(){yield {type:'text-delta',text:'{"items":[]}'};yield {type:'usage',usage:{inputTokens:30,outputTokens:5}};yield {type:'finish',reason:{kind:'stop'}}}})},
     on:(name,fn)=>{const list=listeners.get(name)||[];list.push(fn);listeners.set(name,list);return()=>listeners.set(name,(listeners.get(name)||[]).filter(x=>x!==fn))},effect:()=>{},logger:{warn:()=>{}},emit:(...v)=>errors.push(v)}
-  const plugin=await createPlugin(ctx,{dataDirectory:directory,...config},{isAgentLoopRequest:o=>o.loop===true})
+  const plugin=await createPlugin(ctx,{dataDirectory:directory,...config},{isAgentLoopRequest:o=>o.loop===true,...options.pluginOptions})
   const call=(name,args,who=a)=>tools.get(name).execute(args,{agent:who,signal:new AbortController().signal})
   const emit=(name,...args)=>{for(const fn of listeners.get(name)||[])fn(...args)}
   const pre=(who=a,next=async()=>({kind:'enter',messages:[]}))=>(listeners.get('agent/pre-step')[0])({agent:who,messages:[],signal:new AbortController().signal},next)
   const event=(who,type,data,extra={})=>{const e={seq:who.events.length,time:'2026-10-28T10:00:00Z',type,data,...extra};who.events.push(e);emit('session/event',who.session,e);return e}
   const bind=async()=>{const lib=(await call('cm_library',{action:'create',name:'测试伙伴'})).library;await call('cm_library',{action:'bind',library_id:lib.id,expected_revision:0});return plugin.store.library(lib.id)}
   t.after(async()=>{await plugin.dispose();rmSync(directory,{recursive:true,force:true})})
-  return {directory,tools,listeners,agents,contexts,ctx,plugin,call,emit,pre,event,bind,a,b,c,agent,errors}
+  return {directory,tools,listeners,agents,contexts,ctx,plugin,call,emit,pre,event,bind,a,b,c,agent,errors,definitions,scopedTools}
 }
 
 test('registered claim-link actions pair sources, expose evidence and invalidate only the working frame',async t=>{
@@ -36,6 +37,49 @@ test('registered claim-link actions pair sources, expose evidence and invalidate
  const status=await h.call('cm_working',{action:'link-status',id:a,limit:3000});assert.equal(JSON.parse(status.relations.text).groups[0].after,'New choice.')
  await h.call('cm_working',{action:'link-retract',link_id:linked.relation.id,refs:[c],reason:'Later evidence retracts association'})
  assert.equal(h.plugin.embedding.claimLinks.resolve(lib.id,[a]).groups.length,0);assert.equal(store.report(lib.id).records,3)
+})
+test('link-status pages relationships with a cursor separately from character pagination',async t=>{
+ const h=await harness(t),lib=await h.bind(),store=h.plugin.store,anchor=store.append(lib.id,{session:'history',seq:1,time:'2026-10-31T00:00:00Z',role:'user',text:'Old choice.'})
+ for(let i=0;i<23;i++){const target=store.append(lib.id,{session:'history',seq:i+2,time:new Date(Date.UTC(2026,9,31,0,0,i+2)).toISOString(),role:'user',text:'Later choice '+i+'.'})
+  await h.call('cm_working',{action:'link',id:anchor,target_id:target,relation:'changed',subject:'synthetic-speaker',topic:'choice',scope:'example',source_quote:'Old choice.',target_quote:'Later choice '+i+'.',reason:'Attributed synthetic change'})}
+ const readBatch=async args=>{
+  let offset=0,text='',info=null
+  for(let n=0;n<12;n++){const result=await h.call('cm_working',{action:'link-status',id:anchor,limit:3000,relation_limit:5,offset,...args});text+=result.relations.text;info=result.relation_page;if(result.relations.next_offset==null)break;offset=result.relations.next_offset}
+  return {payload:JSON.parse(text),page:info}
+ }
+ const first=await readBatch({})
+ assert.ok(first.payload.groups.length>=1)
+ assert.equal(first.payload.links.length,5)
+ assert.ok(first.page.next_cursor)
+ const narrow=await h.call('cm_working',{action:'link-status',id:anchor,limit:60,relation_limit:20})
+ assert.equal(Array.from(narrow.relations.text).length,60)
+ assert.ok(narrow.relations.next_offset,'character pagination of the summary and details remains available')
+ assert.ok(Array.from(JSON.stringify(narrow)).length<=2000,'a 60-character request cannot return an unpaged detail list')
+ const seen=new Set(first.payload.links.map(i=>i.id))
+ let page=first.page,pages=1
+ while(page.has_more&&pages<10){
+  const batch=await readBatch({relation_cursor:page.next_cursor})
+  assert.equal(batch.payload.groups,undefined,'a cursor call does not re-send the summary')
+  assert.ok(batch.payload.links.length>0)
+  for(const item of batch.payload.links){assert.ok(!seen.has(item.id),'cursor pages never repeat a relationship');seen.add(item.id)}
+  page=batch.page;pages++
+ }
+ assert.equal(seen.size,23);assert.equal(page.has_more,false);assert.equal(page.next_cursor,null)
+ await assert.rejects(h.call('cm_working',{action:'link-status',id:anchor,relation_cursor:'broken',relation_limit:5}),{code:'INVALID_CURSOR'})
+})
+test('link-status keeps a long retraction explanation reachable through its character pages',async t=>{
+ const h=await harness(t),lib=await h.bind(),store=h.plugin.store
+ const append=(seq,text,time)=>store.append(lib.id,{session:'history',seq,time,role:'user',text})
+ const a=append(1,'Old choice.','2026-10-31T00:00:00Z'),b=append(2,'New choice.','2026-10-31T00:00:01Z'),e=append(3,'Independent later evidence.','2026-10-31T00:00:02Z')
+ const link=(await h.call('cm_working',{action:'link',id:a,target_id:b,relation:'changed',subject:'synthetic-speaker',topic:'choice',scope:'example',source_quote:'Old choice.',target_quote:'New choice.',reason:'Attributed synthetic change'})).relation
+ const reason='r'.repeat(440)+'-essential-final-context'
+ await h.call('cm_working',{action:'link-retract',link_id:link.id,refs:[e],reason})
+ let offset=0,text=''
+ for(let n=0;n<6;n++){const result=await h.call('cm_working',{action:'link-status',id:a,limit:3000,relation_limit:5,offset});text+=result.relations.text;if(result.relations.next_offset==null)break;offset=result.relations.next_offset}
+ const item=JSON.parse(text).links.find(x=>x.id===link.id)
+ assert.ok(item,'the retracted relationship stays reachable through the character pages')
+ assert.equal(item.retraction.reason,reason)
+ assert.equal(item.retraction_reason,reason)
 })
 
 test('主动切换注意点触发下步召回，不替旧任务宣称完成',async t=>{
@@ -465,4 +509,97 @@ test('Foreground pre-step cancels background embedding without pausing retrieval
  h.plugin.embedding.lookup=async()=>({results:[],candidates:[]});h.emit('agent/status',{agent:h.a,status:'idle'});await entered
  h.event(h.a,'user/message',{content:'现在查合成蓝色台灯'});await h.pre()
  assert.equal(signal.aborted,true);assert.equal(h.plugin.embedding.health(lib.id).paused,false);assert.equal(h.plugin.store.library(lib.id).error,null)
+})
+
+// --- Host proof for "the tool body never ran" -----------------------------------------------
+const hostError=code=>({isError:true,error:{message:'synthetic host failure',info:{name:'SyntheticHostError',code}}})
+function proofHarness(t,definitions,pluginOptions={}){return harness(t,{}, {definitions,pluginOptions})}
+function toolExec(h,name,callId,agent=h.a,args={}){return {agent,name,arguments:args,callId,signal:new AbortController().signal}}
+async function runTool(h,exec,next){return h.listeners.get('tools/execute')[0](exec,next)}
+async function rejectIntent(h,exec,code='FS_NOT_OBSERVED'){
+ const handler=h.listeners.get('fs/edit-intent')[0]
+ try{await handler({displayPath:'synthetic',targetKey:'synthetic'},exec,async()=>{throw Object.assign(new Error('synthetic intent rejection'),{name:'FsError',code})})}catch{}
+}
+test('a host-proven native edit refusal is not_started, not a pending uncertain item',async t=>{
+ const h=await proofHarness(t,{edit:{name:'edit',execute:async()=>{}}}),lib=await h.bind(),store=h.plugin.store
+ const op=id=>store.db.prepare('SELECT status,stage FROM cm_tool_operations WHERE call_id=?').get(id)
+ const target=join(h.directory,'synthetic.txt');writeFileSync(target,'original content')
+ const exec=toolExec(h,'edit','native-unread',h.a,{file_path:target,old_string:'a',new_string:'b'})
+ const result=await runTool(h,exec,async()=>{await rejectIntent(h,exec);return hostError('FS_NOT_OBSERVED')})
+ assert.equal(result.isError,true)
+ assert.equal(op('native-unread').status,'not_started');assert.equal(op('native-unread').stage,'pre-effect')
+ assert.equal(store.recovery.needsReview(lib.id),false)
+ assert.equal(readFileSync(target,'utf8'),'original content','a refused edit must not modify the target file')
+ const success=toolExec(h,'edit','native-read-edit',h.a,{file_path:target,old_string:'a',new_string:'b'})
+ await runTool(h,success,async()=>{await h.listeners.get('fs/edit-intent')[0]({displayPath:target},success,async()=>({version:1}));return {content:[{type:'text',text:'edited'}]}})
+ assert.equal(op('native-read-edit').status,'succeeded')
+})
+test('a scoped shadow of edit that fakes the same refusal stays uncertain',async t=>{
+ const h=await proofHarness(t,{edit:{name:'edit',execute:async()=>{}}}),lib=await h.bind(),store=h.plugin.store
+ h.scopedTools.set(h.a,new Map([['edit',{name:'edit'}]]))
+ const exec=toolExec(h,'edit','shadow-edit')
+ await runTool(h,exec,async()=>{await rejectIntent(h,exec);return hostError('FS_NOT_OBSERVED')})
+ assert.equal(store.db.prepare('SELECT status FROM cm_tool_operations WHERE call_id=?').get('shadow-edit').status,'uncertain')
+ assert.equal(store.recovery.needsReview(lib.id),true)
+})
+test('a composite tool that triggers an intent rejection then fakes the code stays uncertain',async t=>{
+ const h=await proofHarness(t,{synthetic_composite:{name:'synthetic_composite'}}),lib=await h.bind(),store=h.plugin.store
+ const target=join(h.directory,'composite.txt');writeFileSync(target,'before')
+ const exec=toolExec(h,'synthetic_composite','composite-write',h.a,{file_path:target})
+ await runTool(h,exec,async()=>{writeFileSync(target,'after');await rejectIntent(h,exec);return hostError('FS_NOT_OBSERVED')})
+ assert.equal(store.db.prepare('SELECT status FROM cm_tool_operations WHERE call_id=?').get('composite-write').status,'uncertain')
+ assert.equal(readFileSync(target,'utf8'),'after','a composite body that already wrote must not be cleared by an inner intent rejection')
+})
+test('an invisible tool reported as UNKNOWN_TOOL is not_started while a visible body faking it stays uncertain',async t=>{
+ const h=await proofHarness(t,{}),lib=await h.bind(),store=h.plugin.store
+ await runTool(h,toolExec(h,'synthetic_missing','unknown-missing'),async()=>hostError('UNKNOWN_TOOL'))
+ assert.equal(store.db.prepare('SELECT status FROM cm_tool_operations WHERE call_id=?').get('unknown-missing').status,'not_started')
+ assert.equal(store.recovery.needsReview(lib.id),false)
+ h.definitions.set('synthetic_visible',{name:'synthetic_visible'})
+ await runTool(h,toolExec(h,'synthetic_visible','unknown-visible'),async()=>hostError('UNKNOWN_TOOL'))
+ assert.equal(store.db.prepare('SELECT status FROM cm_tool_operations WHERE call_id=?').get('unknown-visible').status,'uncertain')
+})
+
+test('changing a captured native execution function cannot inherit its no-effect proof',async t=>{
+ for(const during of [false,true]){
+  const definition={name:'edit',execute:async()=>{}},h=await proofHarness(t,{edit:definition}),lib=await h.bind(),exec=toolExec(h,'edit','changed-definition-'+during)
+  if(!during)definition.execute=async()=>{}
+  await runTool(h,exec,async()=>{await rejectIntent(h,exec);if(during)definition.execute=async()=>{};return hostError('FS_NOT_OBSERVED')})
+  assert.equal(h.plugin.store.db.prepare('SELECT status FROM cm_tool_operations WHERE call_id=?').get(exec.callId).status,'uncertain')
+  assert.equal(h.plugin.store.recovery.needsReview(lib.id),true)
+ }
+})
+
+test('a changed parameter contract cannot inherit a native definition snapshot',async t=>{
+ const definition={name:'edit',execute:async()=>{},parameters:{type:'object',properties:{file_path:{type:'string'}},required:['file_path']}},h=await proofHarness(t,{edit:definition}),lib=await h.bind(),exec=toolExec(h,'edit','changed-schema')
+ definition.parameters.required=[]
+ await runTool(h,exec,async()=>{await rejectIntent(h,exec);return hostError('FS_NOT_OBSERVED')})
+ assert.equal(h.plugin.store.db.prepare('SELECT status FROM cm_tool_operations WHERE call_id=?').get(exec.callId).status,'uncertain')
+ assert.equal(h.plugin.store.recovery.needsReview(lib.id),true)
+})
+
+test('provider refusal codes need the corresponding accepted native intent',async t=>{
+ for(const [name,code]of [['edit','FS_EDIT_NOT_FOUND'],['edit','FS_AMBIGUOUS_EDIT'],['write','FS_NOT_OBSERVED']]){
+  const h=await proofHarness(t,{[name]:{name,execute:async()=>{}}}),lib=await h.bind(),exec=toolExec(h,name,'no-provider-phase-'+code)
+  await runTool(h,exec,async()=>({isError:true,error:{info:{name:'FsError',code}}}))
+  assert.equal(h.plugin.store.db.prepare('SELECT status FROM cm_tool_operations WHERE call_id=?').get(exec.callId).status,'uncertain')
+  assert.equal(h.plugin.store.recovery.needsReview(lib.id),true)
+ }
+})
+
+test('a native write with a replace intent cannot claim a create-only refusal',async t=>{
+ const h=await proofHarness(t,{write:{name:'write',execute:async()=>{}}}),lib=await h.bind(),exec=toolExec(h,'write','wrong-write-intent')
+ await runTool(h,exec,async()=>{await h.listeners.get('fs/write-intent')[0]({},exec,async()=>({kind:'replaceIfVersion',version:'synthetic'}));return {isError:true,error:{info:{name:'FsError',code:'FS_NOT_OBSERVED'}}}})
+ assert.equal(h.plugin.store.db.prepare('SELECT status FROM cm_tool_operations WHERE call_id=?').get(exec.callId).status,'uncertain')
+ assert.equal(h.plugin.store.recovery.needsReview(lib.id),true)
+})
+
+test('a schema validation failure is proof only when the host validator returns violations',async t=>{
+ for(const [label,validate,expected]of [['supported',()=>['missing new_string'],'not_started'],['unavailable',()=>{throw Error('No usable host validator')},'uncertain']]){
+  const definition={name:'edit',execute:async()=>{},parameters:{type:'object',properties:{new_string:{type:'string'}},required:['new_string']}},h=await proofHarness(t,{edit:definition},{validateJsonSchemaValue:validate}),lib=await h.bind(),exec=toolExec(h,'edit','schema-'+label);let dispatched=0
+  await runTool(h,exec,async()=>{dispatched++;return {isError:true,error:{info:{name:'ToolArgsError',code:'INVALID_ARGS'}}}})
+  assert.equal(dispatched,1,'the recovery observer does not add a separate tool-dispatch gate')
+  assert.equal(h.plugin.store.db.prepare('SELECT status FROM cm_tool_operations WHERE call_id=?').get(exec.callId).status,expected)
+  assert.equal(h.plugin.store.recovery.needsReview(lib.id),expected==='uncertain')
+ }
 })

@@ -67,3 +67,8 @@ dsh plugin --profile YOUR_PROFILE add "link:C:\agent-test\returning-tide-memory"
 [工具接口](docs/API.md) · [架构](docs/ARCHITECTURE.md) · [安装](docs/INSTALL.md) · [迁移](docs/MIGRATION.md) · [恢复](docs/RECOVERY.md) · [隐私](docs/PRIVACY.md) · [验证](docs/VALIDATION.md) · [更新记录](CHANGELOG.md)
 
 MIT 开源，保留 [上游参考与许可说明](docs/THIRD-PARTY-NOTES.md)。DSH 负责模型运行循环，本插件不依赖 LangGraph。
+
+- 区分原生工具的明确未执行与结果未知；主请求运行时也能人工核对旧待确认项。待核对列表动态刷新，同库保留草稿、跨库隔离，见 [恢复说明](docs/API.md#human-review-and-failure-stages)。
+- 关系支持稳定游标与独立字符分页，完整保留关联和撤销依据；较早的已认可状态也可配对到最新认可版本，保留大小写、词间空格及关键标点。
+
+设置 DSH_SDK_RUNTIME 为本机 DSH runtime 目录后，运行 npm run test:native-failures，可复现原生工具失败分类矩阵。测试使用普通文件复制与独立临时环境，不连接真实会话；诊断资料保留在打印出的临时目录。

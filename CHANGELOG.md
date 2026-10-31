@@ -1,5 +1,15 @@
 # Changes
 
+## 0.3.7
+
+- Separate native unread/missing-file edits, missing or ambiguous literal matches, invalid edit/write arguments, unread overwrite refusals, and genuinely absent tools from unknown outcomes using native identity and stage evidence. A custom tool reporting the same error code does not inherit proof; unavailable registry lookups fail closed. Keep actual started-write interruptions for human review.
+- Recognize validated foreground shell metadata without widening command syntax. Preserve raw sources and existing unresolved history.
+- Let the authenticated human manager review a specific older uncertain operation while a main request is running, without releasing its lease or replaying any action. Live running operations cannot be acknowledged this way.
+- Refresh newly pending review rows and the jump target, retain drafts during same-library refresh, isolate drafts between libraries, and display time/error/stage in both languages.
+- Page claim relationships with library/source-bound keyset cursors plus independent character pages. Keep complete attribution and retraction explanations reachable.
+- Pair retrieved early accepted revisions with the latest accepted state beyond 100 revisions; preserve case, word boundaries and significant punctuation. Prefer native source order over delayed archival time.
+- Retain readable short summaries and quotes within the same 120-character card and 650-character compact response budgets, dropping whole lower-ranked cards when needed.
+
 ## 0.3.6
 
 - Recognize native grep/glob and literal-only PowerShell diagnostics during recovery; migrate historical read-only misclassifications without replay. Evidence-backed local memory edits and checkpoint saves remain available; normal operation adds no plugin tool-approval gate.

@@ -51,6 +51,12 @@ async function initializePlugin(ctx,config,options,resources){
     }
   }
   if(typeof isLoop!=='function') fail('HOST_API_UNAVAILABLE','需要 isAgentLoopRequest 以区分主模型和辅助调用')
+  // Reuse the host's own schema rules. Missing SDK support is not proof of invalid arguments.
+  let validateToolArguments=options.validateJsonSchemaValue
+  if(typeof validateToolArguments!=='function'){
+    try{validateToolArguments=(await import('@deepseek-ai/dsh-tools')).validateJsonSchemaValue}
+    catch{if(config.runtimePackageJson)try{const require=createRequire(resolve(config.runtimePackageJson));validateToolArguments=(await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-tools')).href)).validateJsonSchemaValue}catch{}}
+  }
   const store = new ContinuityStore(resolve(config.dataDirectory || join(process.env.DSH_HOME || join(homedir(),'.dsh'),'continuity-core')),options.storeOptions)
   resources.store=store
   store.ownerLabel=id=>{const title=sessionTitle(ctx.agents.get(id));return title?title+' ('+id+')':id}
@@ -317,13 +323,23 @@ async function initializePlugin(ctx,config,options,resources){
     }
     fail('INVALID_INPUT','未知活动操作')
   })
-  register('cm_working','status/clear查看或清空临时工作集。focus用query声明当前任务/注意点并触发召回；换任务前用检查点保存真实进度，不宣称旧任务完成。feedback记录引用cited/帮助helpful/重申reaffirmed/纠正corrected/失效invalidated，需id、1—3条后续原文refs和reason；cited依据需含被引用ID。负向反馈必须给具体cue，检索时可高置信语义匹配，不宣判整篇无效。feedback-status分页查反馈；feedback-retract需feedback_id、refs、reason；feedback-resume恢复已核对的纠正索引。link需id/target_id、relation、subject/topic/scope、两端精确原句与reason；changed为变化、corrected为有归属的纠正、disputed为争议、contextual区分情境，不认证事实。link-status查看两端；link-retract需link_id/refs/reason。曝光和读取不算强化，不改人格或原文。',object({action:{type:'string',enum:['status','clear','focus','feedback','feedback-status','feedback-retract','feedback-resume','link','link-status','link-retract']},id:str('被使用的原文ID；link为旧原文，link-status为任一端'),target_id:str('link的另一条原文ID'),relation:{type:'string',enum:['changed','corrected','disputed','contextual']},subject:str('说法归属主体'),topic:str('被关联的具体事项'),scope:str('适用情境，避免不同场景混为矛盾'),source_quote:str('旧原文内精确片段，最多160字符'),target_quote:str('另一原文内精确片段，最多160字符'),link_id:str('link-retract的关联ID'),kind:{type:'string',enum:['cited','helpful','reaffirmed','corrected','invalidated']},refs:{type:'array',items:{type:'string'},description:'1—3条实际后续记录，不含被回忆的原文本身'},reason:str('具体依据，不写空泛奖励'),cue:str('具体线索，纠正或失效必填，至少2字符'),feedback_id:str('撤销的反馈ID'),query:str('focus的当前注意点，或反馈状态查询线索'),offset:num('字符分页起点'),limit:num('字符分页上限，默认1200，最多3000')},['action']),async(a,e)=>{
+  register('cm_working','status/clear查看或清空临时工作集。focus用query声明当前任务/注意点并触发召回；换任务前用检查点保存真实进度，不宣称旧任务完成。feedback记录引用cited/帮助helpful/重申reaffirmed/纠正corrected/失效invalidated，需id、1—3条后续原文refs和reason；cited依据需含被引用ID。负向反馈必须给具体cue，检索时可高置信语义匹配，不宣判整篇无效。feedback-status分页查反馈；feedback-retract需feedback_id、refs、reason；feedback-resume恢复已核对的纠正索引。link需id/target_id、relation、subject/topic/scope、两端精确原句与reason；changed为变化、corrected为有归属的纠正、disputed为争议、contextual区分情境，不认证事实。link-status查看两端：摘要与关系详情都按offset/limit字符分页；relation_cursor选择下一批关系（原样传relation_page.next_cursor），不重复发送已读批次；link-retract需link_id/refs/reason。曝光和读取不算强化，不改人格或原文。',object({action:{type:'string',enum:['status','clear','focus','feedback','feedback-status','feedback-retract','feedback-resume','link','link-status','link-retract']},id:str('被使用的原文ID；link为旧原文，link-status为任一端'),target_id:str('link的另一条原文ID'),relation:{type:'string',enum:['changed','corrected','disputed','contextual']},subject:str('说法归属主体'),topic:str('被关联的具体事项'),scope:str('适用情境，避免不同场景混为矛盾'),source_quote:str('旧原文内精确片段，最多160字符'),target_quote:str('另一原文内精确片段，最多160字符'),link_id:str('link-retract的关联ID'),kind:{type:'string',enum:['cited','helpful','reaffirmed','corrected','invalidated']},refs:{type:'array',items:{type:'string'},description:'1—3条实际后续记录，不含被回忆的原文本身'},reason:str('具体依据，不写空泛奖励'),cue:str('具体线索，纠正或失效必填，至少2字符'),feedback_id:str('撤销的反馈ID'),query:str('focus的当前注意点，或反馈状态查询线索'),offset:num('字符分页起点'),limit:num('字符分页上限，默认1200，最多3000'),relation_cursor:str('link-status关系分页游标，原样传入上一页relation_page.next_cursor'),relation_limit:num('link-status关系每页条数，1—20，默认5')},['action']),async(a,e)=>{
     const{id,session}=owned(e),dynamics=embedding.memoryDynamics
     if(a.action==='link'||a.action==='link-retract'){
       const relation=a.action==='link'?embedding.claimLinks.record(id,session,a):embedding.claimLinks.retract(id,session,a)
       working.invalidate(id,session,'claim-link-updated');return {relation}
     }
-    if(a.action==='link-status'){integer(a.limit??1200,'limit',1,3000);return {relations:page(JSON.stringify(embedding.claimLinks.status(id,a.id)),a.offset??0,a.limit??1200)}}
+    if(a.action==='link-status'){
+      integer(a.limit??1200,'limit',1,3000)
+      const pageLimit=a.relation_limit??5
+      integer(pageLimit,'relation_limit',1,20)
+      const cursor=a.relation_cursor??null
+      const full=cursor==null?embedding.claimLinks.status(id,a.id,{limit:pageLimit}):null
+      const relation=cursor==null?full.relation_page:embedding.claimLinks.relations(id,a.id,{cursor,limit:pageLimit})
+      const payload=(cursor==null?{groups:full.groups,more:full.more,note:full.note}:{note:relation.note})
+      payload.links=relation.items
+      return {relations:page(JSON.stringify(payload),a.offset??0,a.limit??1200),relation_page:{has_more:relation.has_more,next_cursor:relation.next_cursor,returned:relation.returned,recorded_total:relation.recorded_total,limit:relation.limit,displayed_characters:JSON.stringify(payload).length,note:'关系详情在这段字符分页内；next_cursor只选下一批，不重复已读关系。'}}
+    }
     if(a.action==='focus'){
       text(a.query,'query',800);working.invalidate(id,session,'focus-change');working.signalEvent(id,session,'task-switch','explicit-focus:'+hash(a.query),a.query)
       store.log(id,'working-focus-declared',{query:a.query,task_completion_asserted:false});return {focus:clip(a.query,160),recall_scheduled:working.config.enabled,note:'已声明当前注意点；下一模型步骤按预算召回，未标记任务完成。'}
@@ -441,6 +457,35 @@ async function initializePlugin(ctx,config,options,resources){
   disposers.push(ctx.on('agent/created',({agent,source})=>{const id=libraryFor(SID(agent));if(id){if(source==='compact')store.markCompacted(SID(agent));attach(agent);scheduleEmbedding(agent)}}))
   disposers.push(ctx.on('agent/status',({agent,status})=>{if(status==='idle'){releaseMain(SID(agent));void idleExtraction(agent);void idleEmbedding(agent)}else{const id=libraryFor(SID(agent));if(id)embeddingJobs.get(id)?.abort()}}))
   disposers.push(ctx.on('agent/disposed',({agent})=>{releaseMain(SID(agent));toolContext.clear(SID(agent));const d=seen.get(agent)?.dispose;if(typeof d==='function')d();seen.delete(agent)}))
+  // Proof sources for "the tool body never ran": the resolved definition identity and the host's own
+  // FS edit-intent stage. A tool body can throw the same codes, so neither name nor code is enough.
+  const nativeDefinitions=new Map(),nativeNames=new Set(['edit','write'])
+  const lookupDefinition=(name,scope)=>{
+    if(typeof ctx.tools?.get!=='function')return {available:false}
+    try{return {available:true,definition:ctx.tools.get(name,scope)}}catch{return {available:false}}
+  }
+  const snapshotDefinition=definition=>{
+    if(!definition||typeof definition.execute!=='function')return null
+    try{return {definition,execute:definition.execute,parameters:JSON.stringify(definition.parameters)}}catch{return null}
+  }
+  const matchesDefinition=(captured,definition)=>{
+    if(!captured||captured.definition!==definition||captured.execute!==definition?.execute)return false
+    try{return captured.parameters===JSON.stringify(definition.parameters)}catch{return false}
+  }
+  const captureNative=name=>{const current=lookupDefinition(name);if(current.available&&!nativeDefinitions.has(name)){const captured=snapshotDefinition(current.definition);if(captured)nativeDefinitions.set(name,captured)}}
+  for(const name of nativeNames)captureNative(name)
+  const definitelyInvalidArguments=(schema,args)=>{
+    if(!schema||typeof validateToolArguments!=='function')return false
+    try{const violations=validateToolArguments(schema,args,'');return Array.isArray(violations)&&violations.length>0}catch{return false}
+  }
+  const editIntents=new Map()
+  const rememberIntent=(key,value)=>{editIntents.set(key,value);while(editIntents.size>64)editIntents.delete(editIntents.keys().next().value)}
+  for(const operation of ['edit','write'])disposers.push(ctx.on('fs/'+operation+'-intent',async(target,actor,next)=>{
+    const session=actor?.agent?SID(actor.agent):null,callId=actor?.callId,key=session&&callId?session+'\u0000'+callId:null
+    const record={tool:actor?.name||null,operation,rejected:false,code:null}
+    try{const value=await next();if(key)rememberIntent(key,{...record,accepted:true,intentKind:value?.kind??null});return value}
+    catch(error){const rejected={...record,rejected:true,code:error?.code||'FS_INTENT_REJECTED'};if(key)rememberIntent(key,rejected);throw error}
+  },{prepend:true}))
   // A child may perform a task, but only the parent owns this library and its recovery state.
   disposers.push(ctx.on('tools/execute',async(exec,next)=>{
     const session=SID(exec.agent),id=libraryFor(session)
@@ -449,11 +494,24 @@ async function initializePlugin(ctx,config,options,resources){
     const parent=managedAncestor(exec.agent);if(parent)store.recovery.assertTool(parent.id,exec.name,exec.arguments)
     const managed=id||parent?.id
     if(!managed)return next()
+    const before=lookupDefinition(exec.name,exec.agent),global=lookupDefinition(exec.name)
+    // A global-identical visible definition is the strongest identity a plugin can observe. The first
+    // observed global identity is frozen so a later replacement cannot inherit trust; a scoped shadow
+    // is a different object and never qualifies.
+    const sameGlobal=before.available&&global.available&&before.definition!==undefined&&before.definition===global.definition
+    if(sameGlobal&&nativeNames.has(exec.name))captureNative(exec.name)
+    const trustedNative=sameGlobal&&nativeNames.has(exec.name)&&matchesDefinition(nativeDefinitions.get(exec.name),before.definition)
+    const invalidArguments=before.available&&!!before.definition&&definitelyInvalidArguments(before.definition.parameters,exec.arguments)
+    const trust=()=>{const after=lookupDefinition(exec.name,exec.agent),afterGlobal=lookupDefinition(exec.name),intent=session&&exec.callId?editIntents.get(session+'\u0000'+exec.callId):undefined
+      if(session&&exec.callId)editIntents.delete(session+'\u0000'+exec.callId)
+      const stableNative=trustedNative&&after.available&&afterGlobal.available&&after.definition===afterGlobal.definition&&matchesDefinition(nativeDefinitions.get(exec.name),after.definition)
+      const sameIntent=!!intent&&intent.tool===exec.name&&intent.operation===exec.name
+      return {unknownTool:before.available&&after.available&&before.definition===undefined&&after.definition===undefined,nativeEdit:exec.name==='edit'&&stableNative,nativeWrite:exec.name==='write'&&stableNative,invalidArguments:invalidArguments&&stableNative,editIntentRejected:sameIntent&&intent.rejected===true,editIntentAccepted:sameIntent&&intent.accepted===true,editIntentCode:intent?.code||null,writeIntentAccepted:sameIntent&&intent.accepted===true,writeIntentKind:intent?.intentKind??null}}
     const call={callId:exec.callId,name:exec.name,arguments:exec.arguments}
     execution.start(managed,session,call)
     const failureRecall=()=>{if(!/^cm_/.test(exec.name||'')){const owner=parent?.session||session;working.signalEvent(managed,owner,'tool-failure',exec.callId||exec.name,'工具 '+clip(exec.name,100)+' 失败；核对过去相同工具的错误、处理办法与当前任务')}}
-    try{const result=await next();execution.complete(managed,session,exec.callId,result);if(toolOutcome(result).isError)failureRecall();else if(id)try{toolContext.observe(managed,session,exec.name,exec.arguments)}catch(error){store.log(managed,'tool-context-hint-failed',{code:error.code||'CONTEXT_HINT_FAILED',main_chat_blocked:false})}return result}
-    catch(error){execution.complete(managed,session,exec.callId,{error:{code:error.code,message:'Host tool execution failed'}},{thrown:true});failureRecall();throw error}
+    try{const result=await next();execution.complete(managed,session,exec.callId,result,{trust:trust()});if(toolOutcome(result).isError)failureRecall();else if(id)try{toolContext.observe(managed,session,exec.name,exec.arguments)}catch(error){store.log(managed,'tool-context-hint-failed',{code:error.code||'CONTEXT_HINT_FAILED',main_chat_blocked:false})}return result}
+    catch(error){execution.complete(managed,session,exec.callId,{error:{code:error.code,message:'Host tool execution failed'}},{thrown:true,trust:trust()});failureRecall();throw error}
   },{prepend:true}))
   disposers.push(ctx.on('llm/stream',async function*(request,next){
     const session=request.sessionId,id=libraryFor(session)

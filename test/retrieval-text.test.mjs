@@ -33,3 +33,21 @@ test('Tool card display can read a command without converting an intent into com
  const text=JSON.stringify({call_id:'synthetic-123',arguments:{command:'cat synthetic-restart.log',description:'检查合成重启日志'}}),r={role:'tool',text,time:'2026-10-31T10:00:00Z'}
  const c=recallCard(r,.03,'0123456789',text,'synthetic-restart.log');assert.match(c.title,/检查/);assert.ok(text.includes(c.quote));assert.doesNotMatch(c.summary,/已完成/)
 })
+test('A complete card keeps a judgeable summary and a verbatim quote inside 120 characters',()=>{
+ const text='代理合成台灯的说明🌊：当时只做好片头，还没有发布作品。'.repeat(20),r={text,role:'user',origin:{kind:'user'},time:'2026-10-31T10:00:00Z'}
+ const card=recallCard(r,.0234,'0123456789',text,'代理合成台灯')
+ assert.ok(Array.from(JSON.stringify(card)).length<=120)
+ assert.deepEqual(Object.keys(card).sort(),['id','quote','score','summary','time','title'].sort())
+ assert.ok(Array.from(card.summary).length>=10,'the summary stays judgeable inside the 120-character budget')
+ assert.ok(Array.from(card.quote).length>=10)
+ assert.ok(text.includes(card.quote))
+})
+test('An overlong id keeps a judgeable summary by falling back to date precision, not to a one-character summary',()=>{
+ const text='代理合成台灯的说明🌊：当时只做好片头。'.repeat(20),r={text,role:'user',origin:{kind:'user'},time:'2026-10-31T10:00:00Z'}
+ const card=recallCard(r,.0234,'0123456789abcdef01234567',text,'代理合成台灯')
+ assert.ok(Array.from(JSON.stringify(card)).length<=120)
+ assert.ok(Array.from(card.summary).length>=6)
+ assert.ok(Array.from(card.quote).length>=8)
+ assert.match(card.time,/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/)
+ assert.ok(text.includes(card.quote))
+})

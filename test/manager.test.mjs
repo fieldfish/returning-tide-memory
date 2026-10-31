@@ -93,16 +93,37 @@ test('人工界面建库、命名、绑定、配置预算、暂停恢复与校�
  assert.equal(f.modelCalls(),0)
  f.plugin.store.pause(library_id,'SOURCE_CHANGED');assert.equal((await f.api('resume',{library_id})).error,'REPAIR_REQUIRED')
 })
-test('人工核查不重放，忙碌时拒绝恢复；管理令牌随卸载失效',async t=>{
+test('人工核查不重放；忙碌代理的旧 uncertain 项仍可在管理页核对',async t=>{
  const f=await fixture(t),created=await f.api('create',{name:'review'}),library_id=created.result.library.id
  await f.api('bind',{library_id,session:f.agent.session.id,expected_revision:0})
  f.plugin.store.recovery.observe(library_id,f.agent.session.id,{type:'tool/call',data:{name:'mock_send',callId:'uncertain'}})
  f.plugin.store.recovery.observe(library_id,f.agent.session.id,{type:'tool/result',data:{message:{toolCallId:'uncertain'},error:{code:'ABORTED'}}})
  const args={library_id,operation_session:f.agent.session.id,call_id:'uncertain',decision:'abandon-no-replay',note:'Human chooses not to replay synthetic action'}
- f.agent.status='running';assert.equal((await f.api('review',args)).http,409);assert.equal(f.plugin.store.recovery.needsReview(library_id),true)
- f.agent.status='idle';const result=await f.api('review',args);assert.equal(result.result.replayed,false)
+ f.agent.status='running'
+ const result=await f.api('review',args);assert.equal(result.ok,true);assert.equal(result.result.replayed,false)
  assert.equal(f.plugin.store.recovery.needsReview(library_id),false)
+ assert.equal(f.plugin.store.recovery.pending(library_id).operations.length,0)
  const path=f.plugin.manager.accessPath;assert.ok(existsSync(path));await f.plugin.dispose();assert.equal(existsSync(path),false);assert.equal(f.modelCalls(),0)
+})
+test('忙碌时不能核对 live running 项，核对一项也不清除其他待核对项',async t=>{
+ const f=await fixture(t),created=await f.api('create',{name:'review boundaries'}),library_id=created.result.library.id
+ await f.api('bind',{library_id,session:f.agent.session.id,expected_revision:0})
+ const observe=(type,callId,error)=>f.plugin.store.recovery.observe(library_id,f.agent.session.id,{type,data:error?{message:{toolCallId:callId},error}:{name:'mock_send',callId}})
+ observe('tool/call','old-one');observe('tool/result','old-one',{code:'ABORTED'})
+ observe('tool/call','old-two');observe('tool/result','old-two',{code:'TIMEOUT'})
+ observe('tool/call','live-one')
+ f.agent.status='running'
+ const live=await f.api('review',{library_id,operation_session:f.agent.session.id,call_id:'live-one',decision:'abandon-no-replay',note:'must not confirm a live call'})
+ assert.equal(live.ok,false);assert.equal(live.error,'CONFLICT')
+ const pending=(await f.api('health',{library_id})).result.recovery.operations
+ assert.deepEqual(pending.map(o=>o.call_id).sort(),['old-one','old-two'])
+ assert.ok(pending.every(o=>o.failure_code&&o.stage==='unverified'))
+ const first=await f.api('review',{library_id,operation_session:f.agent.session.id,call_id:'old-one',decision:'verified-not-applied',note:'Earlier review is independent of the live call'})
+ assert.equal(first.ok,true)
+ const remaining=(await f.api('health',{library_id})).result.recovery.operations
+ assert.deepEqual(remaining.map(o=>o.call_id),['old-two'])
+ assert.equal(f.plugin.store.db.prepare("SELECT status FROM cm_tool_operations WHERE call_id='live-one'").get().status,'running')
+ assert.equal(f.modelCalls(),0)
 })
 
 test('暂停再恢复不能覆盖来源变化或存储故障',async t=>{

@@ -24,7 +24,14 @@ function ownership(){
  $('ownerBanner').classList.toggle('warning',different)
  if(!busy){$('bind').disabled=!lib||!!owner||!target;$('handoff').disabled=!lib||!owner||!different}
 }
-$('recoveryJump').onclick=()=>{$('recoveryPanel').scrollIntoView({behavior:'smooth',block:'start'});$('recoveryPanel').focus({preventScroll:true})}
+$('recoveryJump').onclick=()=>work(async()=>{
+ if(!state.library)throw Error(ui('请先选择或创建记忆库'))
+ const r=await api('health',{library_id:state.library.id})
+ state.library=r.library;healthBanners(r);syncRecovery(r.recovery,state.library.id)
+ const count=r.recovery.operations.length+r.recovery.legacy.length
+ $('recoveryPanel').scrollIntoView({behavior:'smooth',block:'start'});$('recoveryPanel').focus({preventScroll:true})
+ if(!count)notice(ui('当前没有待核查项。'))
+})
 function healthBanners(r){
  const incomplete=r.embedding.index_work_remaining||r.working?.frame?.status==='index-incomplete',count=r.recovery.operations.length+r.recovery.legacy.length
  $('indexBanner').hidden=!incomplete
@@ -34,7 +41,43 @@ function healthBanners(r){
  const cards=$('recallCards');if(cards){cards.replaceChildren();for(const c of r.recall_cards||[]){const row=text('div','','item'),title=c.title.replace(/^(对话|旧文件|旧笔记|工具|笔记)·/,(_all,label)=>ui(label)+' · ');row.append(text('strong',title),text('div',c.id+' · '+c.score+' · '+c.time,'small'),text('p',c.summary),text('blockquote',c.quote||''));cards.append(row)}}
 }
 // Refresh only operational indicators; never overwrite forms or a human review in progress.
-setInterval(async()=>{if(busy||document.hidden||!state.library)return;const id=state.library.id;try{const r=await api('health',{library_id:id});if(state.library?.id!==id||busy)return;state.library=r.library;healthBanners(r);ownership()}catch{notice(ui('状态刷新失败，请点击刷新核对；未改动记忆。'))}},10000)
+setInterval(async()=>{if(busy||document.hidden||!state.library)return;const id=state.library.id;try{const r=await api('health',{library_id:id});if(state.library?.id!==id||busy)return;state.library=r.library;healthBanners(r);syncRecovery(r.recovery,id);ownership()}catch{notice(ui('状态刷新失败，请点击刷新核对；未改动记忆。'))}},10000)
+const stageLabels={ 'pre-dispatch': ui('未派发'), 'pre-validation': ui('参数校验拒绝'), 'pre-effect': ui('未生效'), 'unverified': ui('执行后未知') }
+const recoveryKey=op=>op.kind+':'+(op.session||'')+':'+(op.call_id||op.id||'')
+const pendingSignature=(libraryId,pending)=>JSON.stringify([libraryId,...(pending?.operations||[]).map(o=>[o.session,o.call_id,o.failure_code,o.stage]),...(pending?.legacy||[]).map(o=>[o.id])])
+let recoverySignature=null
+function recoveryMeta(op){
+ const parts=[ui('时间：')+(Number.isFinite(op.time)?new Date(op.time).toLocaleString():ui('未知'))]
+ if(op.failure_code)parts.push(ui('错误：')+op.failure_code)
+ if(op.stage)parts.push(ui('阶段：')+(stageLabels[op.stage]||op.stage))
+ return parts.join(' · ')
+}
+// Rebuild only when the pending set or its library changes; drafts are preserved per library/key.
+function syncRecovery(pending,libraryId){
+ const signature=pendingSignature(libraryId,pending)
+ if(signature===recoverySignature)return false
+ recoverySignature=signature
+ const box=$('recovery'),prior=new Map()
+ for(const row of box.querySelectorAll('.item')){if(row.dataset.key)prior.set(row.dataset.key,{choice:row.querySelector('select')?.value??'',note:row.querySelector('input')?.value??''})}
+ box.replaceChildren()
+ const list=[...(pending?.operations||[]).map(o=>({...o,kind:'operation'})),...(pending?.legacy||[]).map(o=>({...o,kind:'legacy'}))]
+ if(!list.length)box.append(text('p',ui('没有待核查的操作。')))
+ for(const op of list){
+  const key=libraryId+':'+recoveryKey(op),row=text('div','','item');row.dataset.key=key
+  row.append(text('strong',op.name||ui('旧版未追踪中断')),text('div',op.call_id||op.id||'','small'),text('div',recoveryMeta(op),'small'))
+  const choice=document.createElement('select')
+  for(const [id,label] of [['',ui('请选择核查结果')],['abandon-no-replay',ui('放弃重放，不记为成功')],['verified-applied',ui('已核对，操作成功')],['verified-not-applied',ui('已核对，没有执行')]]){const option=document.createElement('option');option.value=id;option.textContent=label;choice.append(option)}
+  row.append(choice)
+  const note=document.createElement('input');note.placeholder=ui('核查依据或放弃重放的原因');row.append(note)
+  const saved=prior.get(key);if(saved){choice.value=saved.choice;note.value=saved.note}
+  const b=text('button',ui('记录人工核查'))
+  b.onclick=()=>work(async()=>{try{const result=await api('review',{...chosen(),operation_session:op.session,call_id:op.call_id,legacy_id:op.id,decision:choice.value,note:note.value});recoverySignature=null;await inspect();const remaining=(result.pending?.operations?.length||0)+(result.pending?.legacy?.length||0);notice(ui('已记录核查，没有重新执行原操作。')+(remaining?ui(' 仍有待核对项。'):''))}catch(error){notice(ui('核对未完成：')+error.message)}})
+  row.append(b)
+  if(op.kind==='operation'){const v=text('button',ui('尝试只读核验'));v.onclick=()=>work(async()=>{const result=await api('verify',{...chosen(),operation_session:op.session,call_id:op.call_id});await inspect();notice(result.status==='unknown'?(result.reason||ui('外部证据不足，保持待核查。')):ui('核验结果：')+result.status+ui('；没有重放动作。'))});row.append(v)}
+  box.append(row)
+ }
+ return true
+}
 async function refresh(){const prior=$('library').value,priorSession=$('session').value;state.overview=await api('overview');select('library',state.overview.libraries,l=>l.id,l=>l.name);if([...$('library').options].some(o=>o.value===prior))$('library').value=prior;select('session',state.overview.sessions,a=>a.id,sessionLabel);for(const option of $('session').options)option.title=option.value;const owner=state.overview.libraries.find(l=>l.id===$('library').value)?.owner,target=state.overview.sessions.some(s=>s.id===priorSession)?priorSession:owner;if([...$('session').options].some(o=>o.value===target))$('session').value=target;await inspect();notice(ui('已刷新。本机管理不会发送模型消息。'))}
 $('session').onchange=sessionDetails
 const chosen=()=>{if(!state.library)throw Error(ui('请先选择或创建记忆库'));return {library_id:state.library.id}}
@@ -57,9 +100,7 @@ async function inspect(){
  const ownerSession=state.overview.sessions.find(s=>s.id===r.library.owner),ownerTitle=r.library.owner_title||(ownerSession&&ownerSession.title!==ownerSession.id?ownerSession.title:null)
  $('summary').textContent=ui`${r.library.name}\n当前主会话：${ownerTitle||(r.library.owner?ui('主会话未加载或尚未命名'):ui('尚未绑定'))}\n库状态：${r.library.error||ui('正常')} · 当前执行：${r.active?ui('正在进行'):ui('空闲')}\n经历原文：${r.records} 条 · 已索引分片：${r.embedding.indexed_parts??ui('未知')} · 待索引：${r.embedding.pending_parts??ui('未知')}`
  sessionDetails()
- const box=$('recovery');box.replaceChildren();const pending=[...r.recovery.operations.map(o=>({...o,kind:'operation'})),...r.recovery.legacy.map(o=>({...o,kind:'legacy'}))]
- if(!pending.length)box.append(text('p',ui('没有待核查的操作。')))
- for(const op of pending){const row=text('div','', 'item');row.append(text('strong',op.name||ui('旧版未追踪中断')),text('div',op.call_id||op.id,'small'));const choice=document.createElement('select');for(const [id,label] of [['',ui('请选择核查结果')],['abandon-no-replay',ui('放弃重放，不记为成功')],['verified-applied',ui('已核对，操作成功')],['verified-not-applied',ui('已核对，没有执行')]]){const option=document.createElement('option');option.value=id;option.textContent=label;choice.append(option)}row.append(choice);const note=document.createElement('input');note.placeholder=ui('核查依据或放弃重放的原因');row.append(note);const b=text('button',ui('记录人工核查'));b.onclick=()=>work(async()=>{await api('review',{...chosen(),operation_session:op.session,call_id:op.call_id,legacy_id:op.id,decision:choice.value,note:note.value});await inspect();notice(ui('已记录核查，没有重新执行原操作。'))});row.append(b);if(op.kind==='operation'){const v=text('button',ui('尝试只读核验'));v.onclick=()=>work(async()=>{const result=await api('verify',{...chosen(),operation_session:op.session,call_id:op.call_id});await inspect();notice(result.status==='unknown'?(result.reason||ui('外部证据不足，保持待核查。')):ui('核验结果：')+result.status+ui('；没有重放动作。'))});row.append(v)}box.append(row)}
+ syncRecovery(r.recovery,r.library.id)
  tasks(r.task_page)
  $('summary').textContent+=ui('\n尚未分片：')+(r.embedding.unprepared_records??ui('未知'))+ui(' 条原文')
  const cfg=r.extraction?.config||{source:'dsh',maxCallsPerDay:12,maxInputChars:12000,maxOutputTokens:1800};state.extractionConfig=cfg;for(const id of ['source','model','provider','baseURL','apiKeyEnv','maxCallsPerDay','maxInputChars','maxOutputTokens'])$(id).value=cfg[id]??'';$('evidenceEnabled').checked=!!cfg.evidenceEnabled;$('situationsEnabled').checked=!!cfg.situationsEnabled

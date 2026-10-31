@@ -1,6 +1,6 @@
 {
   "name": "dsh-returning-tide-memory",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "private": false,
   "description": "Returning Tide Memory: local long-term retrieval, contextual working memory, and sourced continuity for DSH.",
   "type": "module",
@@ -77,7 +77,8 @@
     "recall:dynamics": "node evals/working-quality.mjs --dynamics",
     "recall:situations": "node evals/situation-quality.mjs",
     "recall:activity": "node evals/activity-quality.mjs",
-    "recall:corrections": "node evals/correction-quality.mjs"
+    "recall:corrections": "node evals/correction-quality.mjs",
+    "test:native-failures": "node test/native-failure-host.mjs"
   },
   "repository": {
     "type": "git",

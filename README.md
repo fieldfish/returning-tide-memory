@@ -24,6 +24,9 @@ It does not rewrite persona files. A retrieved passage is a candidate, not proof
 - Attributed before/after claim links: changes, corrections, unresolved disputes and context differences return together with source pointers; accepted state versions are paired automatically. Links do not certify facts. See [API and limits](docs/API.md).
 - Recovery recognizes native `grep`/`glob`, literal read-only `pwsh`, and evidence-backed local memory edits. Normal tool use adds no plugin approval gate; host permissions still apply.
 
+- Native pre-effect failure handling, actionable human review during an active request, and live review rows with library-scoped drafts. Read the [recovery contract](docs/API.md#human-review-and-failure-stages).
+- Stable relationship batch cursors and full character-paged evidence; early accepted-state sources pair with later accepted revisions without collapsing meaningful punctuation.
+
 ## Requirements
 
 Node >=22.13, a compatible DSH host, and local Ollama with qwen3-embedding:0.6b. The tested host environment is documented in docs/VALIDATION.md. Model weights, DSH itself, account credentials, and user libraries are not bundled.
@@ -67,3 +70,5 @@ Retrieval is probabilistic. Successful archival does not guarantee perfect recal
 The project is independent of desktop companion applications. Public examples use synthetic actor labels; no user persona, private conversation, account identifier, real workstation path, credential, database, or private implementation journal is shipped. Chinese-language UI and retrieval support remain available, while project branding and actor identifiers are neutral.
 
 MIT. See [third-party notes](docs/THIRD-PARTY-NOTES.md). DSH owns the model loop; this package does not require LangGraph.
+
+Set DSH_SDK_RUNTIME to the installed runtime directory and run npm run test:native-failures to reproduce the synthetic native-tool refusal matrix. No directory links or live-chat messages are used.
