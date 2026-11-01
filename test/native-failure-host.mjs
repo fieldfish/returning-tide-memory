@@ -5,7 +5,10 @@ import {tmpdir} from 'node:os'
 import {fileURLToPath,pathToFileURL} from 'node:url'
 import assert from 'node:assert/strict'
 import {createServer} from 'node:http'
+import {DatabaseSync} from 'node:sqlite'
+import {registerReadOnlyTool} from '../lib/tool-contracts.mjs'
 const runtimeDirectory=process.env.DSH_SDK_RUNTIME;assert.ok(runtimeDirectory&&existsSync(join(runtimeDirectory,'package.json')),'Set DSH_SDK_RUNTIME to the installed DSH runtime directory')
+const desktop=process.argv.includes('--desktop-preset')
 const candidate=fileURLToPath(new URL('../',import.meta.url));const {ContinuityStore}=await import(pathToFileURL(join(candidate,'lib/store.mjs')).href)
 const root=mkdtempSync(join(tmpdir(),'rt-native-failure-host-')),out=join(root,'reviewer-host-boundaries-'+Date.now()),home=join(out,'home'),workspace=join(out,'workspace'),directory=join(out,'memory'),profile=join(home,'profiles','pending-test'),sid='synthetic-pending-main',source=candidate
 for(const p of [home,workspace,join(profile,'node_modules')])mkdirSync(p,{recursive:true})
@@ -19,6 +22,25 @@ try{
  const testPackage=join(profile,'node_modules','dsh-returning-tide-memory');mkdirSync(testPackage)
  for(const entry of ['package.json','index.mjs','cli.mjs','lib','web','cordis.patch.yml'])cpSync(join(source,entry),join(testPackage,entry),{recursive:true,dereference:false,filter:path=>{if(lstatSync(path).isSymbolicLink())throw Error('Test runtime copy rejects every directory link');return true}})
  const patch=[{id:'session-title-llm',disabled:true},{id:'hmr',disabled:true},{id:'settings',disabled:true},{id:'config-editor',disabled:true},{id:'plugin-manager',disabled:true},{id:'deepseek-account',config:{desktopPlatform:'win32'}},{id:'session-persistence-jsonl',config:{root:join(home,'sessions')}},{id:'storage-json',config:{root:join(home,'storages')}},{id:'system-prompt',config:{personaPrefix:''}},{id:'continuity-core',config:{dataDirectory:directory,runtimePackageJson:runtime,manager:{enabled:true},workingMemory:{enabled:true},embedding:{ollamaUrl:'http://127.0.0.1:'+server.address().port,model:'synthetic-embedding'},memoryDynamics:{enabled:true}}}]
+ report.composition=desktop?'standard-preset-tools':'base-global'
+ process.env.DSH_WEB_FETCH_PROVIDER='offline-test'
+ patch.push({id:'web',config:{fetchProvider:'offline-test'}})
+ if(desktop){
+   // Mount the affected *official* rows via the real preset registry, exactly as
+   // the desktop profile moves them out of the global table. No GUI is needed.
+   const webRoot=join(runtimeDirectory,'node_modules','@deepseek-ai','dsh-web-app')
+   const config=readFileSync(join(webRoot,'presets','standard.patch.yml'),'utf8')
+     .replaceAll("!!js process.platform !== 'win32'",String(process.platform!=='win32'))
+     .replaceAll("!!js process.platform === 'win32'",String(process.platform==='win32'))
+   const shipped=yaml.load(config)[0].insert.find(entry=>entry.id==='preset-standard')
+   const names=['tool-fs','tool-pwsh','tool-fs-search','tool-web']
+   const plugins=shipped.config.plugins.filter(entry=>names.includes(entry.id))
+   assert.equal(plugins.length,names.length)
+   const webPatch=readFileSync(join(webRoot,'cordis.patch.yml'),'utf8').replaceAll('\r\n','\n')
+   for(const id of names){assert.ok(webPatch.includes('- id: '+id+'\n  disabled: true'));patch.push({id,disabled:true})}
+   patch.push({insert:[{id:'agent-preset-registry',name:'@deepseek-ai/dsh-agent-preset-registry',config:{default:'standard'}},
+     {...shipped,config:{...shipped.config,plugins}}]})
+ }
  writeFileSync(join(profile,'cordis.patch.yml'),yaml.dump(patch));process.env.DSH_HOME=home;process.env.DSH_TELEMETRY_DISABLED='1';process.chdir(workspace)
  const {runProfile}=await load('@deepseek-ai/dsh/profile-boot'),{createLaunchEnvironmentSnapshot}=await load('@deepseek-ai/dsh-launch-environment'),{LlmAdapter}=await load('@deepseek-ai/dsh-llm')
  boot=await runProfile({environment:createLaunchEnvironmentSnapshot([{source:'process',values:{...process.env}}]),profile:'pending-test',patchFiles:[],args:[]})
@@ -29,8 +51,10 @@ try{
  boot.ctx.llm.registerAdapter(['synthetic-pending'],new Synthetic())
  handle=await boot.ctx.agents.create({sessionId:sid,meta:{cwd:workspace},agentOptions:{provider:'synthetic-pending',model:'synthetic-model',maxTokens:300}})
  const agent=handle.agent
+ if(desktop){await boot.ctx.agentPresets.select(agent,'standard');assert.equal(boot.ctx.agentPresets.composedPreset(agent.ctx),'standard')}
  const access=JSON.parse(readFileSync(join(directory,'manager-access.json'),'utf8')),u=new URL(access.url),api=async(action,args={})=>{const r=await fetch(u.origin+'/api',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+u.hash.slice(1)},body:JSON.stringify({action,library_id:lib.id,...args})});const body=await r.json();assert.equal(body.ok,true,JSON.stringify(body));return body.result}
- const native=async(name,args)=>agent.ctx.tools.execute({callId:'failure-'+Date.now(),name,arguments:args,agent,signal:AbortSignal.timeout(10000)})
+ let sequence=0
+ const native=async(name,args,callId='failure-'+(++sequence))=>agent.ctx.tools.execute({callId,name,arguments:args,agent,signal:AbortSignal.timeout(10000)})
 
  report.cases=[]
  const tools=await load('@deepseek-ai/dsh-tools'),{FsError}=await load('@deepseek-ai/dsh-fs'),{HarnessError}=await load('@deepseek-ai/dsh-llm'),file=join(workspace,'unobserved-edit.txt'),mark=join(workspace,'composite-side-effect.txt')
@@ -106,6 +130,75 @@ try{
   try{await native(name,{});expect(readFileSync(mark,'utf8')===code,'composite fixture did not run');expect((await state()).recovery.operations.some(x=>x.name===name),'custom effect followed by '+code+' was incorrectly certified harmless');await clear()}finally{dispose()}
  }
 
+ const db=new DatabaseSync(join(directory,'continuity.sqlite3'),{readOnly:true})
+ let fetchCalls=0,readerCalls=0
+ const removeWeb=boot.ctx.web.registerFetchProvider({id:'offline-test',available:()=>true,async fetch(){
+   fetchCalls++;throw new HarnessError('Synthetic provider failure','WEB_PROVIDER_ERROR')
+ }})
+ const videoDefinition={name:'video_probe',description:'Synthetic mixed-mode video tool.',parameters:{type:'object',properties:{mode:{type:'string'}},required:['mode'],additionalProperties:false},
+   output:{schema:{type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false},render:()=>''},
+   execute:async args=>{readerCalls++;if(args.mode==='save')writeFileSync(mark,'fixture output');throw new Error('Synthetic video failure')}}
+ const removeReader=registerReadOnlyTool(agent.ctx,videoDefinition,args=>args.mode==='inspect'&&Object.keys(args).length===1)
+ report.feedback_cases=[]
+ const row=id=>db.prepare('SELECT name,status,readonly,stage,failure_code FROM cm_tool_operations WHERE library=? AND session=? AND call_id=?').get(lib.id,sid,id)
+ async function check(id,name,args,status,readonly,pending){
+   const result=await native(name,args,id),record=row(id)
+   assert.equal(result.isError,true,id)
+   assert.equal(record?.status,status,id);assert.equal(record.readonly,readonly,id)
+   assert.equal((await state()).recovery.operations.length,pending,id)
+   report.feedback_cases.push({id,...record,pending})
+   return record
+ }
+ try{
+   assert.equal(!!boot.ctx.tools.get('edit'),!desktop)
+   const unread=join(workspace,'feedback-unread.txt');writeFileSync(unread,'original')
+   assert.equal((await check('feedback-edit','edit',{file_path:unread,old_string:'original',new_string:'replacement'},'not_started',0,0)).stage,'pre-effect')
+   assert.equal(readFileSync(unread,'utf8'),'original')
+   if(process.platform==='win32'){
+     const rejected=await check('invalid-pwsh','pwsh',{command:12,description:'must be a string'},'not_started',0,0)
+     assert.equal(rejected.stage,'pre-validation');assert.equal(rejected.failure_code,'INVALID_ARGS')
+   }
+   await check('offline-fetch','web_fetch',{url:'http://127.0.0.1/'},'failed',1,0)
+   await check('declared-probe','video_probe',{mode:'inspect'},'failed',1,0)
+   const mixed=await check('saved-before-error','video_probe',{mode:'save'},'uncertain',0,1)
+   assert.equal(mixed.stage,'unverified');assert.equal(readFileSync(mark,'utf8'),'fixture output')
+   await check('read-during-hold','video_probe',{mode:'inspect'},'failed',1,1)
+   await check('fetch-during-hold','web_fetch',{url:'http://127.0.0.1/'},'failed',1,1)
+   const blocked=await native('video_probe',{mode:'save'},'second-save')
+   assert.ok(blocked.isError);assert.equal(readerCalls,3);assert.equal(fetchCalls,2)
+   assert.equal(row('second-save'),undefined,'guard must run before dispatch')
+   // Replacing an approved reader with an undeclared registration of the same
+   // name must not grant it permission during the outstanding write review.
+   removeReader()
+   const removeShadow=agent.ctx.tools.register({...videoDefinition,execute:async()=>{throw new Error('shadow executed')}})
+   try{const denied=await native('video_probe',{mode:'inspect'},'untrusted-shadow')
+     assert.ok(denied.isError);assert.equal(row('untrusted-shadow'),undefined)
+   }finally{removeShadow()}
+   await clear()
+   const board=registerReadOnlyTool(agent.ctx,{...videoDefinition,name:'video_storyboard',execute:async args=>{
+     if(args.mode==='save')writeFileSync(mark,'storyboard output')
+     throw new HarnessError('Synthetic storyboard timeout','TOOL_TIMEOUT')
+   }},args=>args.mode==='inspect' && Object.keys(args).length===1)
+   try{
+     await check('storyboard-inspect','video_storyboard',{mode:'inspect'},'failed',1,0)
+     await check('storyboard-save','video_storyboard',{mode:'save'},'uncertain',0,1)
+     assert.equal(readFileSync(mark,'utf8'),'storyboard output');await clear()
+   }finally{board()}
+   for(const name of ['web_fetch',...(process.platform==='win32'?['pwsh']:[])]){
+     const args=name==='pwsh'?{command:12,description:'lookalike'}:{url:'http://127.0.0.1/'}
+     const official=boot.ctx.tools.get(name,agent)
+     const remove=agent.ctx.tools.register({...official,execute:async()=>{
+       writeFileSync(mark,'shadow-'+name)
+       if(name==='pwsh')throw new tools.ToolArgsError(['synthetic error after writing'])
+       throw new HarnessError('Synthetic failure after writing','WEB_PROVIDER_ERROR')
+     }})
+     try{
+       await check('shadow-'+name,name,args,'uncertain',0,1)
+       assert.equal(readFileSync(mark,'utf8'),'shadow-'+name)
+       await clear()
+     }finally{remove()}
+   }
+ }finally{db.close();removeWeb();removeReader()}
  report.failures=failures
  assert.deepEqual(failures,[])
 

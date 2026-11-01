@@ -1,5 +1,7 @@
 # Status: Completed
 
+Version 0.3.11 repairs false recovery holds in global and standard desktop tool scopes and adds an explicit read-mode contract for third-party plugins. The [recovery guide](docs/RECOVERY.md) describes which failures can be settled automatically, how to register a video inspector and how existing pending writes are reviewed.
+
 Returning Tide Memory is a completed, stable release within the implemented scope described in docs/STATUS.md. It includes source archival, hybrid retrieval, contextual working memory, source-adjacent scenes, versioned state and situations, attributed fading, explicit handoffs, and recovery.
 
 Validation is recorded in docs/VALIDATION.md and PACKAGE-STATUS.json. Completed describes delivery of these features; retrieval remains probabilistic and the documented operating limits still apply. Installation does not automatically bind an unrelated session or rewrite persona files.

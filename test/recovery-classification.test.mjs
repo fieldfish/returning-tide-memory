@@ -55,7 +55,7 @@ test('FS_NOT_OBSERVED needs both a trusted native edit identity and the host edi
  f.ledger.complete(f.lib.id,'owner','no-intent',errorResult('FS_NOT_OBSERVED'),{trust:{nativeEdit:true,editIntentRejected:false}})
  assert.equal(f.op('no-intent').status,'uncertain')
  f.ledger.start(f.lib.id,'owner',f.call('proven','edit',{file_path:'x',old_string:'a',new_string:'b'}))
- f.ledger.complete(f.lib.id,'owner','proven',errorResult('FS_NOT_OBSERVED'),{trust:{nativeEdit:true,editIntentRejected:true}})
+ f.ledger.complete(f.lib.id,'owner','proven',errorResult('FS_NOT_OBSERVED'),{trust:{nativeEdit:true,editIntentRejected:true,editIntentCode:'FS_NOT_OBSERVED'}})
  assert.equal(f.op('proven').status,'not_started');assert.equal(f.op('proven').stage,'pre-effect')
 })
 test('native host-declined mutations are not_started while the same codes from other identities stay uncertain',t=>{

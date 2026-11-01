@@ -1,5 +1,21 @@
 # Validation
 
+## 0.3.11 recovery feedback
+
+On Windows with DSH NEXT 2.0.19-next and the 0.2.1-rc.2 SDK, test both the global tool registration and a separately composed standard preset using its four shipped tool entries. Each run uses a temporary home, isolated memory, an offline failing web provider and synthetic video tools. The test inspects the actual operation rows, pending counts and the files touched by the controls.
+
+| Single call in the standard preset | 0.3.9 / 0.3.10 pending | 0.3.11 pending |
+| --- | ---: | ---: |
+| Official edit before its required read | 1 | 0 |
+| Official PowerShell with invalid arguments | 1 | 0 |
+| Official web fetch with a failing provider | 1 | 0 |
+| Synthetic video metadata read, registered with the new read contract in 0.3.11 | 1 | 0 |
+| Synthetic file write that takes effect before an error | 1 | 1 |
+
+The Windows release gate requires 441 passing offline tests against the extracted package with the optional SDK enabled. Each of the two host compositions checks 11 feedback cases and six native filesystem refusals. The checks include a registered storyboard timing out in inspect and save modes, read access during review and same-name replacements after side effects. A separate same-session restart test counts exactly one fixture effect. The management checks cover 14 official tool schemas and 17 bilingual desktop/mobile flows.
+
+To reproduce the host runs on Windows, set `DSH_SDK_RUNTIME` to the installed runtime directory. Run `npm run test:native-failures`, `npm run test:preset-recovery` and `npm run test:reload-recovery`. The standard composition test requires the SDK's `dsh-web-app` standard preset. These runs use no live user conversation or cloud dialogue model.
+
 The 0.3 engine completed 330 offline checks, official host tool-schema validation, desktop/narrow-browser UI verification, consistent legacy-copy migration and restore checks, 1000 synthetic lifecycle cycles, and a three-minute isolated actual-host observation. Two actual DSH/DeepSeek handoff scenarios verified fresh-session recall, preference revisions, unfinished-task continuation, actual native compaction, normal host restart, specific corrections, separate similar projects, source-adjacent context, and unsupported-history abstention. Those tests used synthetic experiences and did not modify a live user companion.
 
 Version 0.3.1 changes branding, deployment-specific legacy selection, and neutral fixtures. The current offline tests and privacy audit are rerun on the exact public tree. Generic legacy namespace selection, read-only import, parameterized selectors, and replay exclusion have additional tests. The previous two dialogue scenarios are engine evidence; they are not described as newly rerun after fixture renaming.

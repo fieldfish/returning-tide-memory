@@ -8,6 +8,7 @@ import { Embedding } from './lib/embedding.mjs'
 import { Extraction, EXTRACTION_SYSTEM, normalizeUsage } from './lib/extraction.mjs'
 import {Evidence,EVIDENCE_SYSTEM} from './lib/evidence.mjs'
 import {ExecutionLedger} from './lib/execution.mjs'
+import {createToolContracts} from './lib/tool-contracts.mjs'
 import {Scenes} from './lib/scenes.mjs'
 import {WorkingMemory} from './lib/working-memory.mjs'
 import {ToolContext} from './lib/tool-context.mjs'
@@ -53,6 +54,9 @@ async function initializePlugin(ctx,config,options,resources){
   if(typeof isLoop!=='function') fail('HOST_API_UNAVAILABLE','需要 isAgentLoopRequest 以区分主模型和辅助调用')
   // Reuse the host's own schema rules. Missing SDK support is not proof of invalid arguments.
   let validateToolArguments=options.validateJsonSchemaValue
+  if(typeof validateToolArguments!=='function'&&typeof ctx.loader?.import==='function'){
+    try{validateToolArguments=(await ctx.loader.import('@deepseek-ai/dsh-tools')).validateJsonSchemaValue}catch{}
+  }
   if(typeof validateToolArguments!=='function'){
     try{validateToolArguments=(await import('@deepseek-ai/dsh-tools')).validateJsonSchemaValue}
     catch{if(config.runtimePackageJson)try{const require=createRequire(resolve(config.runtimePackageJson));validateToolArguments=(await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-tools')).href)).validateJsonSchemaValue}catch{}}
@@ -466,21 +470,8 @@ async function initializePlugin(ctx,config,options,resources){
   disposers.push(ctx.on('agent/disposed',({agent})=>{releaseMain(SID(agent));toolContext.clear(SID(agent));const d=seen.get(agent)?.dispose;if(typeof d==='function')d();seen.delete(agent)}))
   // Proof sources for "the tool body never ran": the resolved definition identity and the host's own
   // FS edit-intent stage. A tool body can throw the same codes, so neither name nor code is enough.
-  const nativeDefinitions=new Map(),nativeNames=new Set(['edit','write'])
-  const lookupDefinition=(name,scope)=>{
-    if(typeof ctx.tools?.get!=='function')return {available:false}
-    try{return {available:true,definition:ctx.tools.get(name,scope)}}catch{return {available:false}}
-  }
-  const snapshotDefinition=definition=>{
-    if(!definition||typeof definition.execute!=='function')return null
-    try{return {definition,execute:definition.execute,parameters:JSON.stringify(definition.parameters)}}catch{return null}
-  }
-  const matchesDefinition=(captured,definition)=>{
-    if(!captured||captured.definition!==definition||captured.execute!==definition?.execute)return false
-    try{return captured.parameters===JSON.stringify(definition.parameters)}catch{return false}
-  }
-  const captureNative=name=>{const current=lookupDefinition(name);if(current.available&&!nativeDefinitions.has(name)){const captured=snapshotDefinition(current.definition);if(captured)nativeDefinitions.set(name,captured)}}
-  for(const name of nativeNames)captureNative(name)
+  const contracts=await createToolContracts(ctx,config.runtimePackageJson)
+  disposers.push(ctx.on('internal/status',fiber=>contracts.ownerChanged(fiber)))
   const definitelyInvalidArguments=(schema,args)=>{
     if(!schema||typeof validateToolArguments!=='function')return false
     try{const violations=validateToolArguments(schema,args,'');return Array.isArray(violations)&&violations.length>0}catch{return false}
@@ -497,33 +488,47 @@ async function initializePlugin(ctx,config,options,resources){
   disposers.push(ctx.on('tools/execute',async(exec,next)=>{
     const session=SID(exec.agent),id=libraryFor(session)
     if(managedAncestor(exec.agent)&&/^cm_/.test(exec.name||''))fail('CHILD_MEMORY_DENIED','子代理不能直接操作主会话的记忆库')
-    if(id){store.assertOwner(id,session);store.recovery.assertTool(id,exec.name,exec.arguments)}
-    const parent=managedAncestor(exec.agent);if(parent)store.recovery.assertTool(parent.id,exec.name,exec.arguments)
+    if(id)store.assertOwner(id,session)
+    const parent=managedAncestor(exec.agent)
     const managed=id||parent?.id
     if(!managed)return next()
-    const before=lookupDefinition(exec.name,exec.agent),global=lookupDefinition(exec.name)
-    // A global-identical visible definition is the strongest identity a plugin can observe. The first
-    // observed global identity is frozen so a later replacement cannot inherit trust; a scoped shadow
-    // is a different object and never qualifies.
-    const sameGlobal=before.available&&global.available&&before.definition!==undefined&&before.definition===global.definition
-    if(sameGlobal&&nativeNames.has(exec.name))captureNative(exec.name)
-    const trustedNative=sameGlobal&&nativeNames.has(exec.name)&&matchesDefinition(nativeDefinitions.get(exec.name),before.definition)
-    const invalidArguments=before.available&&!!before.definition&&definitelyInvalidArguments(before.definition.parameters,exec.arguments)
-    const trust=()=>{const after=lookupDefinition(exec.name,exec.agent),afterGlobal=lookupDefinition(exec.name),intent=session&&exec.callId?editIntents.get(session+'\u0000'+exec.callId):undefined
-      if(session&&exec.callId)editIntents.delete(session+'\u0000'+exec.callId)
-      const stableNative=trustedNative&&after.available&&afterGlobal.available&&after.definition===afterGlobal.definition&&matchesDefinition(nativeDefinitions.get(exec.name),after.definition)
-      const sameIntent=!!intent&&intent.tool===exec.name&&intent.operation===exec.name
-      return {unknownTool:before.available&&after.available&&before.definition===undefined&&after.definition===undefined,nativeEdit:exec.name==='edit'&&stableNative,nativeWrite:exec.name==='write'&&stableNative,invalidArguments:invalidArguments&&stableNative,editIntentRejected:sameIntent&&intent.rejected===true,editIntentAccepted:sameIntent&&intent.accepted===true,editIntentCode:intent?.code||null,writeIntentAccepted:sameIntent&&intent.accepted===true,writeIntentKind:intent?.intentKind??null}}
     const call={callId:exec.callId,name:exec.name,arguments:exec.arguments}
+    const before=contracts.inspect(call.name,exec.agent,exec.arguments)
+    if(id)store.recovery.assertTool(id,call.name,exec.arguments,before.readOnly)
+    if(parent)store.recovery.assertTool(parent.id,call.name,exec.arguments,before.readOnly)
+    const argsAtDispatch=before.stamp?hash(JSON.stringify(exec.arguments)??'undefined'):null
+    const invalidArguments=!!before.origin&&definitelyInvalidArguments(before.definition.parameters,exec.arguments)
+    const intentKey=session+'\u0000'+call.callId
+    const trust=()=>{
+      const intent=editIntents.get(intentKey)
+      editIntents.delete(intentKey)
+      const after=contracts.inspect(call.name,exec.agent,exec.arguments)
+      const sameCall=exec.name===call.name&&exec.callId===call.callId&&SID(exec.agent)===session
+      let stable=false
+      try{stable=!!before.stamp&&sameCall&&after.available&&contracts.matches(before.stamp,after.definition)&&argsAtDispatch===hash(JSON.stringify(exec.arguments)??'undefined')}catch{}
+      const native=stable&&!!before.origin&&before.origin.owner===after.origin?.owner
+      const sameIntent=!!intent&&intent.tool===call.name&&intent.operation===call.name
+      return {
+        unknownTool:sameCall&&before.available&&after.available&&!before.definition&&!after.definition,
+        nativeEdit:native&&call.name==='edit',nativeWrite:native&&call.name==='write',nativePwsh:native&&call.name==='pwsh',
+        invalidArguments:invalidArguments&&native,readOnly:stable&&(!before.origin||native)&&before.readOnly===true&&after.readOnly===true,
+        editIntentRejected:sameIntent&&intent.rejected===true,editIntentAccepted:sameIntent&&intent.accepted===true,
+        editIntentCode:intent?.code||null,writeIntentAccepted:sameIntent&&intent.accepted===true,writeIntentKind:intent?.intentKind??null,
+        diagnostic:{origin:before.origin?.source??(before.readOnly?'declared-reader':'unverified'),definition_stable:stable,
+          schema_rejected:invalidArguments,fs_intent:sameIntent?(intent.rejected?'rejected':'accepted'):'not-observed'}
+      }
+    }
     execution.start(managed,session,call)
     const failureRecall=()=>{if(!/^cm_/.test(exec.name||'')){const owner=parent?.session||session;working.signalEvent(managed,owner,'tool-failure',exec.callId||exec.name,'工具 '+clip(exec.name,100)+' 失败；核对过去相同工具的错误、处理办法与当前任务')}}
+    const releaseReadGuard=before.guard?.(exec)
     let result
     try{result=await next()}
-    catch(error){if(!closed){execution.complete(managed,session,exec.callId,{error:{code:error.code,message:'Host tool execution failed'}},{thrown:true,trust:trust()});failureRecall()}throw error}
+    catch(error){if(!closed){execution.complete(managed,session,call.callId,{error:{code:error?.code,info:{name:error?.name},message:'Host tool execution failed'}},{thrown:true,trust:trust()});failureRecall()}throw error}
+    finally{releaseReadGuard?.()}
     // Hot unload can finish while the host tool is still running. Preserve its actual outcome;
     // the next instance can reconcile a source-matched native result, without replaying a tool.
     if(closed)return result
-    execution.complete(managed,session,exec.callId,result,{trust:trust()})
+    execution.complete(managed,session,call.callId,result,{trust:trust()})
     if(toolOutcome(result).isError)failureRecall()
     else if(id)try{toolContext.observe(managed,session,exec.name,exec.arguments)}catch(error){store.log(managed,'tool-context-hint-failed',{code:error.code||'CONTEXT_HINT_FAILED',main_chat_blocked:false})}
     return result

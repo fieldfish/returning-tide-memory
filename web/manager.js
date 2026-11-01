@@ -37,12 +37,12 @@ function healthBanners(r){
  $('indexBanner').hidden=!incomplete
  $('indexBanner').textContent=ui('索引未完成，原文仍在，召回结果可能不全。')+ui` 已索引 ${r.embedding.indexed_parts??0}，待索引 ${r.embedding.pending_parts??0}，尚未分片 ${r.embedding.unprepared_records??0}。`
  $('recoveryBanner').hidden=!count
- $('recoveryMessage').textContent=ui`有 ${count} 项操作结果待核对。仅写操作受限，聊天和已识别的只读查阅仍可用；不会自动重放。`
+ $('recoveryMessage').textContent=ui`有 ${count} 项操作结果待核对。外部写入及未识别的操作受限，可继续聊天、查资料和运行已登记的只读工具。`
  const cards=$('recallCards');if(cards){cards.replaceChildren();for(const c of r.recall_cards||[]){const row=text('div','','item'),title=c.title.replace(/^(对话|旧文件|旧笔记|工具|笔记)·/,(_all,label)=>ui(label)+' · ');row.append(text('strong',title),text('div',c.id+' · '+c.score+' · '+c.time,'small'),text('p',c.summary),text('blockquote',c.quote||''));cards.append(row)}}
 }
 // Refresh only operational indicators; never overwrite forms or a human review in progress.
 setInterval(async()=>{if(busy||document.hidden||!state.library)return;const id=state.library.id;try{const r=await api('health',{library_id:id});if(state.library?.id!==id||busy)return;state.library=r.library;healthBanners(r);syncRecovery(r.recovery,id);ownership()}catch{notice(ui('状态刷新失败，请点击刷新核对；未改动记忆。'))}},10000)
-const stageLabels={ 'pre-dispatch': ui('未派发'), 'pre-validation': ui('参数校验拒绝'), 'pre-effect': ui('未生效'), 'unverified': ui('执行后未知') }
+const stageLabels={ 'pre-dispatch': ui('未派发'), 'pre-validation': ui('参数校验拒绝'), 'pre-effect': ui('未生效'), 'read-only': ui('已核验只读'), 'unverified': ui('执行阶段未证实') }
 const recoveryKey=op=>op.kind+':'+(op.session||'')+':'+(op.call_id||op.id||'')
 const pendingSignature=(libraryId,pending)=>JSON.stringify([libraryId,...(pending?.operations||[]).map(o=>[o.session,o.call_id,o.failure_code,o.stage]),...(pending?.legacy||[]).map(o=>[o.id])])
 let recoverySignature=null

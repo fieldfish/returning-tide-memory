@@ -1,5 +1,12 @@
 # Changes
 
+## 0.3.11
+
+- Resolve the active official tool provider in global and standard desktop preset scopes. Match the actual registration, executor, parameter schema and call evidence before certifying a no-effect refusal.
+- Settle native unread edits when the matching filesystem intent was rejected. Settle invalid official PowerShell arguments when the host validator independently rejects that call and the tool reports its native validation error.
+- Treat official web fetch as a read and add a provider registration API for side-effect-free third-party queries or specific read modes. Recheck a declared mode at the provider boundary. Preserve the recovery hold for partial writes, uncertain timeouts and undeclared tools.
+- Keep verified reads available during review. Record the basis for each classification and clarify the bilingual manager's recovery scope and unverified stages.
+
 ## 0.3.10
 
 - Add a persistent lexical candidate index using Chinese character pairs and ASCII pair/four-character windows. Verify candidates against current full text before applying the existing hybrid ranking and evidence filters.

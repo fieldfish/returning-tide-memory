@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {createServer} from 'node:http'
 import { createPlugin } from '../index.mjs'
+import {registerReadOnlyTool} from '../lib/tool-contracts.mjs'
 
 const settle=()=>new Promise(r=>setImmediate(r))
 async function harness(t,config={},options={}) {
@@ -536,6 +537,32 @@ test('disposing during lexical maintenance waits for the lifecycle queue and doe
 // --- Host proof for "the tool body never ran" -----------------------------------------------
 const hostError=code=>({isError:true,error:{message:'synthetic host failure',info:{name:'SyntheticHostError',code}}})
 function proofHarness(t,definitions,pluginOptions={}){return harness(t,{}, {definitions,pluginOptions})}
+
+test('a verified reader remains usable during review without changing an existing uncertain write',async t=>{
+ const h=await harness(t),lib=await h.bind(),store=h.plugin.store
+ const register={tools:{register:def=>{h.definitions.set(def.name,def);return ()=>h.definitions.delete(def.name)}}}
+ registerReadOnlyTool(register,{name:'clip_info',parameters:{type:'object'},execute:async()=>hostError('MEDIA_UNAVAILABLE')},args=>args.mode==='inspect')
+ const write=toolExec(h,'custom_write','previous-write')
+ await runTool(h,write,async()=>hostError('TOOL_TIMEOUT'))
+ const read=toolExec(h,'clip_info','declared-read',h.a,{mode:'inspect',label:'private fixture value'})
+ await runTool(h,read,()=>h.definitions.get(read.name).execute(read.arguments,read))
+ const op=store.db.prepare('SELECT status,readonly,stage FROM cm_tool_operations WHERE call_id=?')
+ assert.deepEqual({...op.get(read.callId)},{status:'failed',readonly:1,stage:'read-only'})
+ assert.equal(op.get(write.callId).status,'uncertain')
+ assert.equal(store.recovery.pending(lib.id).operations.length,1)
+ const audit=store.db.prepare("SELECT detail FROM audit WHERE type='verified-read-failed'").get().detail
+ assert.equal(JSON.parse(audit).classification.origin,'declared-reader');assert.ok(!audit.includes('private fixture value'))
+ const save=toolExec(h,'clip_info','blocked-save',h.a,{mode:'save'})
+ await assert.rejects(runTool(h,save,()=>assert.fail('write was dispatched')),err=>err.code==='RECOVERY_REVIEW_REQUIRED')
+ assert.equal(op.get(save.callId),undefined)
+})
+
+test('mismatched native intent and returned error cannot certify a failed write',async t=>{
+ const h=await proofHarness(t,{edit:{name:'edit',execute:async()=>{}}}),lib=await h.bind()
+ const call=toolExec(h,'edit','mismatched-evidence')
+ await runTool(h,call,async()=>{await rejectIntent(h,call,'FS_NOT_FOUND');return hostError('FS_NOT_OBSERVED')})
+ assert.equal(h.plugin.store.recovery.pending(lib.id).operations[0].stage,'unverified')
+})
 function toolExec(h,name,callId,agent=h.a,args={}){return {agent,name,arguments:args,callId,signal:new AbortController().signal}}
 async function runTool(h,exec,next){return h.listeners.get('tools/execute')[0](exec,next)}
 async function rejectIntent(h,exec,code='FS_NOT_OBSERVED'){
