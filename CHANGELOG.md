@@ -1,5 +1,11 @@
 # Changes
 
+## 0.3.12
+
+- Match official search, file and directory tools to their active provider and distinguish diagnostic PowerShell arguments from write modes. Scoped same-name replacements cannot inherit a recovery permit. Unknown historical outcomes retain their review decision boundary.
+- Record verified reader entry before calling a registered provider. On restart an interrupted read settles as failed. Interrupted writes and unknown providers remain pending. No replay or timer-based clearance.
+- Exercise real process termination in a disposable host, native and shadow providers in two SDK compositions, and an optional upstream video adapter check.
+
 ## 0.3.11
 
 - Resolve the active official tool provider in global and standard desktop preset scopes. Match the actual registration, executor, parameter schema and call evidence before certifying a no-effect refusal.

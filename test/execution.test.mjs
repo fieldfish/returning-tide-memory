@@ -31,7 +31,7 @@ test('任务列表超过30个仍能分页找到最早任务',t=>{
 
 test('读取工具中断后可查失败并人工许可重试，不能假装已有结果',t=>{
  const f=fixture(t);let task=f.ledger.plan(f.lib.id,'owner','read restart',[{id:'read',title:'read',tool:'read'}]);task=f.ledger.activate(f.lib.id,'owner',task.id,'read',0)
- f.ledger.start(f.lib.id,'owner',f.call('read','read-no-result'));f.reopen()
+ f.ledger.start(f.lib.id,'owner',f.call('read','read-no-result'),true);f.reopen()
  assert.equal(f.ledger.status(f.lib.id,task.id).steps[0].status,'failed')
  f.ledger.permitRetry(f.lib.id,task.id,'read','Read-only request interrupted without result')
  assert.equal(f.store.recovery.needsReview(f.lib.id),false)
@@ -79,7 +79,7 @@ test('嵌套宿主错误保持未知并补上原生引用，迟到事件不抹�
 
 test('兼容旧beta把中断读取标为已结算但没有结果摘要的记录',t=>{
  const f=fixture(t);let task=f.ledger.plan(f.lib.id,'owner','old interrupted read',[{id:'read',title:'read',tool:'read'}]);task=f.ledger.activate(f.lib.id,'owner',task.id,'read',0)
- f.ledger.start(f.lib.id,'owner',f.call('read','old-settled'));f.store.db.prepare("UPDATE cm_tool_operations SET status='settled' WHERE call_id='old-settled'").run();f.reopen()
+ f.ledger.start(f.lib.id,'owner',f.call('read','old-settled'),true);f.store.db.prepare("UPDATE cm_tool_operations SET status='settled' WHERE call_id='old-settled'").run();f.reopen()
  assert.equal(f.ledger.status(f.lib.id,task.id).steps[0].status,'failed');f.ledger.permitRetry(f.lib.id,task.id,'read','human checked old interrupted read')
  assert.equal(f.store.db.prepare("SELECT count(*) n FROM audit WHERE type='legacy-read-result-reclassified'").get().n,1)
 })
@@ -137,7 +137,7 @@ test('外部成功但本地结果丢失：核验后复用成功记录，绝不�
  let task=f.ledger.plan(f.lib.id,'owner','external uncertain',[{id:'send',title:'send',tool:'mock_send'}]);task=f.ledger.activate(f.lib.id,'owner',task.id,'send',0)
  const call=f.call('mock_send','send-001',{to:'synthetic'});f.ledger.prepare(f.lib.id,'owner',call);f.ledger.start(f.lib.id,'owner',call);effects++
  f.reopen();assert.equal(f.ledger.status(f.lib.id,task.id).steps[0].status,'uncertain');assert.equal(f.store.library(f.lib.id).error,null)
- f.store.recovery.assertTool(f.lib.id,'cm_task',{action:'verify'})
+ f.store.recovery.assertTool(f.lib.id,'cm_task',{action:'verify'},true)
  const verified=await f.ledger.verify(f.lib.id,'owner','send-001');assert.equal(verified.status,'applied');assert.equal(verified.replayed,false)
  assert.equal(f.ledger.status(f.lib.id,task.id).steps[0].status,'succeeded');assert.equal(effects,1);assert.equal(verifyCalls,1)
  await assert.rejects(f.ledger.verify(f.lib.id,'owner','send-001'),{code:'CONFLICT'});assert.equal(verifyCalls,1)

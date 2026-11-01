@@ -87,7 +87,7 @@ test('read-only interruption after restart does not require review while a write
  let store=new ContinuityStore(dir)
  const lib=store.create('Synthetic restart classification');store.bind('owner',lib.id,0)
  let ledger=new ExecutionLedger(store)
- ledger.start(lib.id,'owner',{callId:'read-only',name:'ops_bash',arguments:{command:'cat README.md',workdir:'C:/synthetic'}})
+ ledger.start(lib.id,'owner',{callId:'read-only',name:'ops_bash',arguments:{command:'cat README.md',workdir:'C:/synthetic'}},true)
  ledger.start(lib.id,'owner',{callId:'writer',name:'ops_bash',arguments:{command:'echo x > README.md',workdir:'C:/synthetic'}})
  assert.equal(store.db.prepare('SELECT readonly FROM cm_tool_operations WHERE call_id=?').get('read-only').readonly,1)
  store.close()

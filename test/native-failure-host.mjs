@@ -6,6 +6,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url'
 import assert from 'node:assert/strict'
 import {createServer} from 'node:http'
 import {DatabaseSync} from 'node:sqlite'
+import {execFileSync} from 'node:child_process'
 import {registerReadOnlyTool} from '../lib/tool-contracts.mjs'
 const runtimeDirectory=process.env.DSH_SDK_RUNTIME;assert.ok(runtimeDirectory&&existsSync(join(runtimeDirectory,'package.json')),'Set DSH_SDK_RUNTIME to the installed DSH runtime directory')
 const desktop=process.argv.includes('--desktop-preset')
@@ -131,6 +132,22 @@ try{
  }
 
  const db=new DatabaseSync(join(directory,'continuity.sqlite3'),{readOnly:true})
+ const crashMode=process.argv.find(arg=>arg.startsWith('--interrupt='))?.split('=')[1]
+ if(crashMode){
+   assert.ok(process.send && ['read','write','shadow'].includes(crashMode))
+   const tool=crashMode==='shadow'?'grep':'video_probe'
+   const def={name:tool,description:'Isolated interruption fixture',parameters:{type:'object',properties:{mode:{type:'string'}}},
+     output:{schema:{type:'object',properties:{ok:{type:'boolean'}}},render:()=>''},execute:async()=>{
+       const witness=join(workspace,'interrupt-marker')
+       if(crashMode!=='read')writeFileSync(witness,'one effect',{flag:'wx'})
+       process.send({directory,library:lib.id,sid,witness,mode:crashMode})
+       await new Promise(()=>{})
+     }}
+   if(crashMode==='shadow')agent.ctx.tools.register(def)
+   else registerReadOnlyTool(agent.ctx,def,args=>args.mode==='read')
+   await native(tool,{mode:crashMode},'interrupted-body')
+   throw Error('Crash fixture unexpectedly returned')
+ }
  let fetchCalls=0,readerCalls=0
  const removeWeb=boot.ctx.web.registerFetchProvider({id:'offline-test',available:()=>true,async fetch(){
    fetchCalls++;throw new HarnessError('Synthetic provider failure','WEB_PROVIDER_ERROR')
@@ -162,6 +179,23 @@ try{
    await check('declared-probe','video_probe',{mode:'inspect'},'failed',1,0)
    const mixed=await check('saved-before-error','video_probe',{mode:'save'},'uncertain',0,1)
    assert.equal(mixed.stage,'unverified');assert.equal(readFileSync(mark,'utf8'),'fixture output')
+   report.provider_checks=[]
+   for(const [name,args] of [['grep',{pattern:'Original',path:workspace}],['glob',{pattern:'*.txt',path:workspace}],...(process.platform==='win32'?[['pwsh',{command:'Get-Location',description:'Inspect fixture directory'}]]:[])]){
+     const def=boot.ctx.tools.get(name,agent)
+     assert.ok(def,name)
+     const original=await native(name,args,'native-read-'+name)
+     assert.equal(original.isError,false,name+': '+JSON.stringify(original.error))
+     assert.equal(row('native-read-'+name).readonly,1)
+     let effects=0
+     const remove=agent.ctx.tools.register({...def,execute:async()=>{effects++;writeFileSync(mark,'shadow effect');throw new Error('after write')}})
+     try{
+       const id='blocked-reader-'+name
+       assert.ok((await native(name,args,id)).isError);assert.equal(row(id),undefined)
+       assert.equal(effects,0,name);assert.equal(readFileSync(mark,'utf8'),'fixture output')
+       assert.equal((await state()).recovery.operations.length,1)
+       report.provider_checks.push({name,native_read:true,shadow_effects:effects})
+     }finally{remove()}
+   }
    await check('read-during-hold','video_probe',{mode:'inspect'},'failed',1,1)
    await check('fetch-during-hold','web_fetch',{url:'http://127.0.0.1/'},'failed',1,1)
    const blocked=await native('video_probe',{mode:'save'},'second-save')
@@ -199,6 +233,37 @@ try{
      }finally{remove()}
    }
  }finally{db.close();removeWeb();removeReader()}
+ if(process.env.RT_VIDEO_VISION_ROOT){
+   const upstream=process.env.RT_VIDEO_VISION_ROOT
+   assert.equal(JSON.parse(readFileSync(join(upstream,'package.json'),'utf8')).version,'1.4.3')
+   const {apply}=await import(pathToFileURL(join(upstream,'src','index.js')).href)
+   const input=join(workspace,'fixture.mp4')
+   execFileSync(process.env.DSH_FFMPEG_PATH,['-v','error','-f','lavfi','-i','testsrc2=size=320x180:rate=5','-t','2','-c:v','mpeg4',input],{windowsHide:true})
+   let images=0
+   const attachments={async saveImage(img){
+     assert.ok(Buffer.from(img.data).subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')))
+     writeFileSync(join(workspace,'sheet-'+(++images)+'.png'),img.data,{flag:'wx'})
+     return {kind:'image-ref',id:'fixture-'+images,name:img.name,mediaType:img.mediaType}
+   }}
+   const upstreamFixture=async adapted=>apply({attachments,tools:{register:def=>adapted&&def.name==='video_probe'
+     ?registerReadOnlyTool(agent.ctx,def,args=>Object.keys(args).length===1&&args.input===input):agent.ctx.tools.register(def)}})
+   let unmount=await upstreamFixture(false)
+   try{
+     const probe=await native('video_probe',{input});assert.match(probe.value.text,/320x180/)
+     const sheet=await native('video_storyboard',{input,cells:4})
+     assert.ok(sheet.value.images.length===1 && images===1,JSON.stringify(sheet.error??sheet.value.text))
+     const createHold=agent.ctx.tools.register({...videoDefinition,name:'simulated_external_write',execute:async()=>{writeFileSync(mark,'side effect');throw Error('unknown')}})
+     try{await native('simulated_external_write',{})}finally{createHold()}
+     assert.equal((await state()).recovery.operations.length,1)
+     assert.ok((await native('video_probe',{input})).isError)
+     unmount();unmount=await upstreamFixture(true)
+     assert.match((await native('video_probe',{input})).value.text,/320x180/)
+     assert.ok((await native('video_storyboard',{input})).isError)
+     assert.equal(images,1);assert.equal((await state()).recovery.operations.length,1)
+     report.upstream_video={version:'1.4.3',metadata_verified:true,real_pngs:images,undeclared_blocked:true,adapted_probe_allowed:true,storyboard_blocked_during_review:true}
+     await clear()
+   }finally{unmount()}
+ }
  report.failures=failures
  assert.deepEqual(failures,[])
 

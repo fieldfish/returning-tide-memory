@@ -8,7 +8,8 @@ import { Embedding } from './lib/embedding.mjs'
 import { Extraction, EXTRACTION_SYSTEM, normalizeUsage } from './lib/extraction.mjs'
 import {Evidence,EVIDENCE_SYSTEM} from './lib/evidence.mjs'
 import {ExecutionLedger} from './lib/execution.mjs'
-import {createToolContracts} from './lib/tool-contracts.mjs'
+import {createToolContracts,guardHostRead} from './lib/tool-contracts.mjs'
+import {readOnlyTool,localRecoveryTool} from './lib/recovery.mjs'
 import {Scenes} from './lib/scenes.mjs'
 import {WorkingMemory} from './lib/working-memory.mjs'
 import {ToolContext} from './lib/tool-context.mjs'
@@ -69,6 +70,7 @@ async function initializePlugin(ctx,config,options,resources){
   let closed = false
   const lifecycle=new AbortController(),maintenanceTimers=new Map(),embeddingTimers=new Map(),embeddingJobs=new Map()
   const administrativeHandlers=new Map()
+  const localDefinitions=new Map()
   let manager=null
   const libraryFor = session => typeof session==='string' ? store.binding(session)?.library || null : null
   function managedAncestor(agent) {
@@ -223,7 +225,9 @@ async function initializePlugin(ctx,config,options,resources){
       return {ok:true,...result}
     }
     administrativeHandlers.set(toolName,handler)
-    const d=ctx.tools.register({name:toolName,description,parameters:schema,output:{schema:{type:'object',additionalProperties:true},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:handler})
+    const definition={name:toolName,description,parameters:schema,output:{schema:{type:'object',additionalProperties:true},render:(_args,value)=>[{type:'text',text:JSON.stringify(value)}]},execute:handler}
+    localDefinitions.set(toolName,definition)
+    const d=ctx.tools.register(definition)
     if(typeof d==='function')disposers.push(d)
   }
   register('cm_library','管理独立命名的记忆库。create/list/bind/handoff/rename/settings/status/resume。首次绑定显式进行，不修改原人格。handoff只能在新会话发起，等旧执行真正停止后交接。报错暂停后可在未绑定的维护会话显式resume指定库，必须先核对原会话空闲，不重启DSH。',object({action:str('操作'),name:str('库名'),library_id:str('库ID'),expected_revision:num('库版本'),settings:{type:'object',additionalProperties:true}},['action']),async(args,exec)=>{
@@ -494,9 +498,12 @@ async function initializePlugin(ctx,config,options,resources){
     if(!managed)return next()
     const call={callId:exec.callId,name:exec.name,arguments:exec.arguments}
     const before=contracts.inspect(call.name,exec.agent,exec.arguments)
-    if(id)store.recovery.assertTool(id,call.name,exec.arguments,before.readOnly)
-    if(parent)store.recovery.assertTool(parent.id,call.name,exec.arguments,before.readOnly)
-    const argsAtDispatch=before.stamp?hash(JSON.stringify(exec.arguments)??'undefined'):null
+    const local=localDefinitions.has(call.name)&&before.definition===localDefinitions.get(call.name)&&before.definition.execute===administrativeHandlers.get(call.name)
+    if(localDefinitions.has(call.name)&&!local)fail('TOOL_IDENTITY_CHANGED','The visible memory tool could not be verified')
+    const localRead=local&&readOnlyTool(call.name,call.arguments)
+    const permitted=before.readOnly===true||localRead||local&&localRecoveryTool(call.name,call.arguments)
+    store.recovery.assertTool(managed,call.name,exec.arguments,permitted)
+    const argsAtDispatch=before.stamp||permitted?hash(JSON.stringify(exec.arguments)??'undefined'):null
     const invalidArguments=!!before.origin&&definitelyInvalidArguments(before.definition.parameters,exec.arguments)
     const intentKey=session+'\u0000'+call.callId
     const trust=()=>{
@@ -511,20 +518,32 @@ async function initializePlugin(ctx,config,options,resources){
       return {
         unknownTool:sameCall&&before.available&&after.available&&!before.definition&&!after.definition,
         nativeEdit:native&&call.name==='edit',nativeWrite:native&&call.name==='write',nativePwsh:native&&call.name==='pwsh',
-        invalidArguments:invalidArguments&&native,readOnly:stable&&(!before.origin||native)&&before.readOnly===true&&after.readOnly===true,
+        invalidArguments:invalidArguments&&native,readOnly:localRead&&sameCall&&after.definition===before.definition&&readOnlyTool(call.name,exec.arguments)||stable&&(!before.origin||native)&&before.readOnly===true&&after.readOnly===true,
         editIntentRejected:sameIntent&&intent.rejected===true,editIntentAccepted:sameIntent&&intent.accepted===true,
         editIntentCode:intent?.code||null,writeIntentAccepted:sameIntent&&intent.accepted===true,writeIntentKind:intent?.intentKind??null,
         diagnostic:{origin:before.origin?.source??(before.readOnly?'declared-reader':'unverified'),definition_stable:stable,
           schema_rejected:invalidArguments,fs_intent:sameIntent?(intent.rejected?'rejected':'accepted'):'not-observed'}
       }
     }
-    execution.start(managed,session,call)
+    execution.start(managed,session,call,localRead||!!before.origin&&before.readOnly)
     const failureRecall=()=>{if(!/^cm_/.test(exec.name||'')){const owner=parent?.session||session;working.signalEvent(managed,owner,'tool-failure',exec.callId||exec.name,'工具 '+clip(exec.name,100)+' 失败；核对过去相同工具的错误、处理办法与当前任务')}}
-    const releaseReadGuard=before.guard?.(exec)
     let result
-    try{result=await next()}
+    try{
+      const release=permitted?guardHostRead(exec,args=>{
+        const current=contracts.inspect(call.name,exec.agent,args)
+        if(exec.name!==call.name||exec.callId!==call.callId||SID(exec.agent)!==session||argsAtDispatch!==hash(JSON.stringify(args)??'undefined'))return false
+        if(local)return current.definition===localDefinitions.get(call.name)&&current.definition.execute===administrativeHandlers.get(call.name)
+        return current.readOnly&&current.origin?.owner===before.origin?.owner&&contracts.matches(before.stamp,current.definition)
+      }):null
+      try{
+        const end=before.guard?.(exec,args=>{
+          if(closed||exec.name!==call.name||SID(exec.agent)!==session||exec.callId!==call.callId||!contracts.matches(before.stamp,ctx.tools.get(call.name,exec.agent)))fail('SOURCE_CHANGED','Reader registration changed before entry')
+          execution.confirmReaderEntry(managed,session,call.callId,call.name,args)
+        })
+        try{result=await next()}finally{end?.()}
+      }finally{release?.()}
+    }
     catch(error){if(!closed){execution.complete(managed,session,call.callId,{error:{code:error?.code,info:{name:error?.name},message:'Host tool execution failed'}},{thrown:true,trust:trust()});failureRecall()}throw error}
-    finally{releaseReadGuard?.()}
     // Hot unload can finish while the host tool is still running. Preserve its actual outcome;
     // the next instance can reconcile a source-matched native result, without replaying a tool.
     if(closed)return result

@@ -18,7 +18,7 @@ async function harness(t,config={},options={}) {
     agents.set(id,a);return a
   }
   const a=agent('old'),b=agent('new'),c=agent('other')
-  const ctx={tools:{register:s=>{tools.set(s.name,s);return()=>tools.delete(s.name)},get:(name,scope)=>{const scoped=scopedTools.get(scope)?.get(name);return scoped!==undefined?scoped:definitions.get(name)}},agents:{get:id=>agents.get(id),list:()=>[...agents.values()]},sessions:{flush:async()=>{}},llm:{prepareCall:async cfg=>({config:cfg,retryPolicy:{mode:'normal',maxRetries:0},stream:async function*(){yield {type:'text-delta',text:'{"items":[]}'};yield {type:'usage',usage:{inputTokens:30,outputTokens:5}};yield {type:'finish',reason:{kind:'stop'}}}})},
+  const ctx={tools:{register:s=>{tools.set(s.name,s);return()=>tools.delete(s.name)},get:(name,scope)=>{const scoped=scopedTools.get(scope)?.get(name);return scoped!==undefined?scoped:definitions.get(name)??tools.get(name)}},agents:{get:id=>agents.get(id),list:()=>[...agents.values()]},sessions:{flush:async()=>{}},llm:{prepareCall:async cfg=>({config:cfg,retryPolicy:{mode:'normal',maxRetries:0},stream:async function*(){yield {type:'text-delta',text:'{"items":[]}'};yield {type:'usage',usage:{inputTokens:30,outputTokens:5}};yield {type:'finish',reason:{kind:'stop'}}}})},
     on:(name,fn)=>{const list=listeners.get(name)||[];list.push(fn);listeners.set(name,list);return()=>listeners.set(name,(listeners.get(name)||[]).filter(x=>x!==fn))},effect:()=>{},logger:{warn:()=>{}},emit:(...v)=>errors.push(v)}
   const plugin=await createPlugin(ctx,{dataDirectory:directory,...config},{isAgentLoopRequest:o=>o.loop===true,...options.pluginOptions})
   const call=(name,args,who=a)=>tools.get(name).execute(args,{agent:who,signal:new AbortController().signal})
@@ -562,6 +562,19 @@ test('mismatched native intent and returned error cannot certify a failed write'
  const call=toolExec(h,'edit','mismatched-evidence')
  await runTool(h,call,async()=>{await rejectIntent(h,call,'FS_NOT_FOUND');return hostError('FS_NOT_OBSERVED')})
  assert.equal(h.plugin.store.recovery.pending(lib.id).operations[0].stage,'unverified')
+})
+
+test('external searches cannot turn an unverified outcome into a read at startup',async t=>{
+ const h=await harness(t),lib=await h.bind(),store=h.plugin.store
+ for(const name of ['grep','glob','pwsh']){
+   h.definitions.set(name,{name,execute:async()=>hostError('TOOL_TIMEOUT')})
+   const exec=toolExec(h,name,'shadow-'+name,h.a,name==='pwsh'?{command:'Get-Location'}:{pattern:'x'})
+   await runTool(h,exec,()=>h.definitions.get(name).execute())
+   store.recovery.startup()
+   const [pending]=store.recovery.pending(lib.id).operations
+   assert.equal(pending.call_id,exec.callId)
+   store.recovery.resolve(lib.id,{session:h.a.session.id,call_id:exec.callId,decision:'abandon-no-replay',note:'Isolated test only'})
+ }
 })
 function toolExec(h,name,callId,agent=h.a,args={}){return {agent,name,arguments:args,callId,signal:new AbortController().signal}}
 async function runTool(h,exec,next){return h.listeners.get('tools/execute')[0](exec,next)}

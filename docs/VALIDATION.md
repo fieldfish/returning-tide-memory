@@ -1,5 +1,11 @@
 # Validation
 
+## 0.3.12 isolated-host acceptance
+
+Global and standard-preset profiles exercise genuine grep, glob and foreground PowerShell diagnostics during review, plus same-name replacements that would write a local marker. Each replacement must be denied before its body runs. The process-interruption runner kills only its isolated child after provider entry. Two consecutive journal reopens must keep a declared read out of review and preserve uncertainty for a mixed-mode write and a shadow search that wrote first.
+
+Run `npm run test:interrupted-readers` with the installed SDK runtime, alongside the two host composition tests and the reload test below. To repeat the optional upstream video integration, set `RT_VIDEO_VISION_ROOT` to a checkout of dsh-video-vision v1.4.3 and `DSH_FFMPEG_PATH` to an FFmpeg binary. The test generates a local MP4, checks real dimensions and captures a PNG in a temporary attachment sink. Its read adapter is restricted to the fixture input. Upstream has not enabled this contract by default.
+
 ## 0.3.11 recovery feedback
 
 On Windows with DSH NEXT 2.0.19-next and the 0.2.1-rc.2 SDK, test both the global tool registration and a separately composed standard preset using its four shipped tool entries. Each run uses a temporary home, isolated memory, an offline failing web provider and synthetic video tools. The test inspects the actual operation rows, pending counts and the files touched by the controls.

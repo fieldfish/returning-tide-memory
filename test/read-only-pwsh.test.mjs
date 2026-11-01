@@ -16,18 +16,21 @@ test('PowerShell expansion, writes, background execution and script delegation r
  assert.equal(readOnlyTool('pwsh',{command:'Get-Content a',env:{X:'value'}}),false)
  assert.equal(readOnlyTool('pwsh',{command:'Get-Content a',workdir:'C:/synthetic',timeoutMs:1000}),true)
 })
-test('host searches stay available during recovery and historical misclassifications are repaired on restart',t=>{
+test('unverified historical searches stay pending and a verified read stays available',t=>{
  const dir=mkdtempSync(join(tmpdir(),'cm-native-reads-'));let store=new ContinuityStore(dir)
  t.after(()=>{store.close();rmSync(dir,{recursive:true,force:true})})
  const lib=store.create('Synthetic reads');store.bind('owner',lib.id,0)
  const insert=store.db.prepare('INSERT INTO cm_tool_operations(library,session,call_id,name,args_digest,readonly,status,time) VALUES(?,?,?,?,?,?,?,?)')
  for(const name of ['grep','glob'])insert.run(lib.id,'owner',name,name,'old-classification',0,'uncertain',Date.now())
- store.close();store=new ContinuityStore(dir);assert.equal(store.recovery.needsReview(lib.id),false)
- assert.equal(store.db.prepare("SELECT count(*) n FROM cm_tool_operations WHERE readonly=1 AND status='failed'").get().n,2)
+ store.close();store=new ContinuityStore(dir);assert.equal(store.recovery.needsReview(lib.id),true)
+ assert.equal(store.db.prepare("SELECT count(*) n FROM cm_tool_operations WHERE readonly=0 AND status='uncertain'").get().n,2)
  store.db.prepare('INSERT INTO cm_tool_operations(library,session,call_id,name,args_digest,readonly,status,time) VALUES(?,?,?,?,?,?,?,?)').run(lib.id,'owner','send','synthetic_send','write',0,'uncertain',Date.now())
- for(const [name,args]of [['grep',{pattern:'lamp'}],['glob',{pattern:'**/*.md'}],['pwsh',{command:'Get-Content README.md'}],['cm_working',{action:'link-status'}],['cm_working',{action:'focus'}],['cm_checkpoint',{action:'write'}],['cm_self',{action:'propose'}]])assert.doesNotThrow(()=>store.recovery.assertTool(lib.id,name,args))
+ for(const [name,args]of [['grep',{pattern:'lamp'}],['glob',{pattern:'**/*.md'}],['pwsh',{command:'Get-Content README.md'}],['cm_working',{action:'link-status'}],['cm_working',{action:'focus'}],['cm_checkpoint',{action:'write'}],['cm_self',{action:'propose'}]]){
+   assert.throws(()=>store.recovery.assertTool(lib.id,name,args),{code:'RECOVERY_REVIEW_REQUIRED'})
+   assert.doesNotThrow(()=>store.recovery.assertTool(lib.id,name,args,true))
+ }
  assert.throws(()=>store.recovery.assertTool(lib.id,'pwsh',{command:'Remove-Item README.md'}),{code:'RECOVERY_REVIEW_REQUIRED'})
- assert.equal(readOnlyTool('cm_checkpoint',{action:'write'}),false);assert.equal(store.recovery.pending(lib.id).operations.length,1)
+ assert.equal(readOnlyTool('cm_checkpoint',{action:'write'}),false);assert.equal(store.recovery.pending(lib.id).operations.length,3)
 })
 test('normal operation does not impose a read-only policy on native tools',t=>{
  const dir=mkdtempSync(join(tmpdir(),'cm-normal-tools-')),store=new ContinuityStore(dir);t.after(()=>{store.close();rmSync(dir,{recursive:true,force:true})})

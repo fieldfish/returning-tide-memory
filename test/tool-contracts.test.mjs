@@ -1,8 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {createToolContracts,registerReadOnlyTool} from '../lib/tool-contracts.mjs'
+import {createToolContracts,registerReadOnlyTool,guardHostRead} from '../lib/tool-contracts.mjs'
 
 const definition=(name)=>({name,parameters:{type:'object',properties:{}},execute:async()=>name})
+test('a late scope replacement or changed diagnostic cannot dispatch under an earlier read permit',()=>{
+  const exec={arguments:{command:'Get-Location'}},descriptor=Object.getOwnPropertyDescriptor(exec,'arguments')
+  let originalProvider=true
+  const done=guardHostRead(exec,args=>originalProvider&&args.command==='Get-Location')
+  assert.equal(exec.arguments.command,'Get-Location')
+  originalProvider=false;assert.throws(()=>exec.arguments,/changed/)
+  originalProvider=true;exec.arguments={command:'Set-Content marker x'}
+  assert.throws(()=>exec.arguments,/changed/);done()
+  const after=Object.getOwnPropertyDescriptor(exec,'arguments')
+  assert.equal(after.writable,descriptor.writable);assert.equal(after.value.command,'Set-Content marker x')
+})
 async function host(enabled=true) {
   const table=new Map(), registries=new Map(), packages=new Map()
   const preset={},agent={parent:preset},other={}

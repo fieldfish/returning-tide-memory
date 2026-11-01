@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {spawnSync} from 'node:child_process'
 import {pathToFileURL} from 'node:url'
+import {ExecutionLedger} from '../lib/execution.mjs'
 import {ContinuityStore} from '../lib/store.mjs'
 
 function setup(t){
@@ -17,14 +18,14 @@ const call=(name,id='call')=>({type:'tool/call',data:{name,callId:id,arguments:{
 const result=(unknown=false,id='call')=>({type:'tool/result',data:{message:{toolCallId:id},...(unknown?{error:{code:'TOOL_OUTCOME_UNKNOWN'}}:{})}})
 test('interrupted literal shell diagnostics recover without quarantining later tools',t=>{
  const f=setup(t);f.store.begin(f.lib.id,'owner','main')
- f.store.recovery.observe(f.lib.id,'owner',{type:'tool/call',data:{name:'ops_bash',callId:'diagnostic',arguments:{command:'sleep 12; cat restart.log 2>/dev/null | tail -5; tasklist | grep -ci "DSH NEXT"'}}})
+ new ExecutionLedger(f.store).start(f.lib.id,'owner',{name:'ops_bash',callId:'diagnostic',arguments:{command:'cat restart.log'}},true)
  const s=f.reopen();assert.equal(s.recovery.needsReview(f.lib.id),false);assert.equal(s.library(f.lib.id).error,null);s.recovery.assertTool(f.lib.id,'qq_bridge_send',{})
  assert.equal(s.db.prepare('SELECT readonly,status FROM cm_tool_operations WHERE call_id=?').get('diagnostic').readonly,1)
 })
 test('an uncertain outgoing action still allows literal reads and cwd inspection while blocking writes',t=>{
  const f=setup(t);f.store.recovery.observe(f.lib.id,'owner',call('qq_bridge_send'));f.store.recovery.observe(f.lib.id,'owner',result(true))
  const s=f.reopen();assert.equal(s.recovery.needsReview(f.lib.id),true)
- s.recovery.assertTool(f.lib.id,'working_directory',{});s.recovery.assertTool(f.lib.id,'ops_bash',{command:'cat README.md'})
+ s.recovery.assertTool(f.lib.id,'working_directory',{},true);s.recovery.assertTool(f.lib.id,'ops_bash',{command:'cat README.md'},true)
  assert.throws(()=>s.recovery.assertTool(f.lib.id,'ops_bash',{command:'cat README.md > changed.txt'}),{code:'RECOVERY_REVIEW_REQUIRED'})
  assert.throws(()=>s.recovery.assertTool(f.lib.id,'qq_bridge_send',{}),{code:'RECOVERY_REVIEW_REQUIRED'})
 })
@@ -40,14 +41,14 @@ test('未知发送结果不锁对话，只阻止再次写操作；人工核查�
  const f=setup(t);f.store.begin(f.lib.id,'owner','main');f.store.recovery.observe(f.lib.id,'owner',call('ops_bash'));f.store.recovery.observe(f.lib.id,'owner',result(true))
  const s=f.reopen();assert.equal(s.library(f.lib.id).error,null);assert.equal(s.recovery.needsReview(f.lib.id),true)
  const token=s.begin(f.lib.id,'owner','main');s.finish(f.lib.id,token)
- s.recovery.assertTool(f.lib.id,'read',{});s.recovery.assertTool(f.lib.id,'cm_library',{action:'status'})
+ s.recovery.assertTool(f.lib.id,'read',{},true);s.recovery.assertTool(f.lib.id,'cm_library',{action:'status'},true)
  assert.throws(()=>s.recovery.assertTool(f.lib.id,'ops_bash',{}),{code:'RECOVERY_REVIEW_REQUIRED'})
  const review=s.recovery.resolve(f.lib.id,{session:'owner',call_id:'call',decision:'verified-applied',note:'Verified outgoing image message id in local history'})
  assert.equal(review.replayed,false);assert.equal(s.recovery.needsReview(f.lib.id),false)
  assert.throws(()=>s.recovery.resolve(f.lib.id,{session:'owner',call_id:'call',decision:'verified-applied',note:'same'}),{code:'CONFLICT'})
 })
 test('只读工具中断可回收；真正的历史变化错误不会被清掉',t=>{
- const f=setup(t);f.store.begin(f.lib.id,'owner','main');f.store.recovery.observe(f.lib.id,'owner',call('read'));f.store.pause(f.lib.id,'SOURCE_CHANGED')
+ const f=setup(t);f.store.begin(f.lib.id,'owner','main');new ExecutionLedger(f.store).start(f.lib.id,'owner',{name:'read',callId:'call',arguments:{}},true);f.store.pause(f.lib.id,'SOURCE_CHANGED')
  const s=f.reopen();assert.equal(s.library(f.lib.id).error,'SOURCE_CHANGED');assert.equal(s.recovery.needsReview(f.lib.id),false)
  assert.throws(()=>s.begin(f.lib.id,'owner','main'),{code:'PAUSED'})
 })
@@ -66,7 +67,7 @@ test('首次升级遇到旧版活动轮，无法追踪其副作用时保守核�
 test('旧版中断标记迁移为可对话的待核查项，不能绕过写操作保护',t=>{
  const f=setup(t);f.store.pause(f.lib.id,'PREVIOUS_PROCESS_INTERRUPTED')
  const s=f.reopen();assert.equal(s.library(f.lib.id).error,null);assert.equal(s.recovery.needsReview(f.lib.id),true)
- assert.match(s.recovery.context(f.lib.id),/继续对话/);assert.doesNotThrow(()=>s.recovery.assertTool(f.lib.id,'cm_self',{action:'propose'}));assert.throws(()=>s.recovery.assertTool(f.lib.id,'write',{}),{code:'RECOVERY_REVIEW_REQUIRED'})
+ assert.match(s.recovery.context(f.lib.id),/继续对话/);assert.doesNotThrow(()=>s.recovery.assertTool(f.lib.id,'cm_self',{action:'propose'},true));assert.throws(()=>s.recovery.assertTool(f.lib.id,'write',{}),{code:'RECOVERY_REVIEW_REQUIRED'})
  const pending=s.recovery.pending(f.lib.id).legacy[0]
  s.recovery.resolve(f.lib.id,{legacy_id:pending.id,decision:'abandon-no-replay',note:'Human chooses not to replay old task'})
  assert.equal(s.recovery.needsReview(f.lib.id),false)

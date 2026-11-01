@@ -1,5 +1,13 @@
 # Recovery
 
+## 0.3.12 provider checks and process interruption
+
+During recovery, official filesystem search/read tools and supported diagnostic PowerShell or working-directory calls require a matching provider in the active scope. Third-party aliases (including shell or search aliases) need an explicit provider declaration to keep operating during review. Installed local memory operations are checked against their own registered definition. A historical unknown cannot be resolved from its spelling. In ordinary sessions unrecognized external tools can still run.
+
+Register third-party readers using the current `read-contract` export. Its wrapper checks the mode again and commits a SQLite entry for this session, call, tool and argument digest before entering provider code. After a crash a verified in-flight read becomes a failed read with no result. The guard cannot certify side effects in a provider that falsely declares its own behavior. A crash before provider-entry evidence, or an older bundled registration helper without the entry callback, can still require review.
+
+Upstream integration was tested with [dsh-video-vision v1.4.3](https://github.com/Destinhue/dsh-video-vision/tree/v1.4.3) and a synthetic local MP4. An integration adapter registered only metadata reads of that fixture. The original storyboard implementation submitted a real PNG to the attachment sink and kept write handling. The upstream package itself is distributed separately.
+
 ## Tool failures in desktop and global profiles
 
 Starting in 0.3.11 the recovery journal checks the active official tool registration in the current session or its parent scopes. It checks tool identity and parameters again when the result arrives. A native edit rejected by the filesystem before changing a file is recorded as `not_started / pre-effect`. An official PowerShell call whose arguments fail the host schema and return its native validation error is recorded as `not_started / pre-validation`. A PowerShell command that starts and then fails may already have changed something.
@@ -23,7 +31,7 @@ A tool whose **every** mode is read-only may omit the predicate. Declare only mo
 
 ### An existing item is still pending
 
-Open the local manager and choose **查看并处理 / Review pending operations**. Verify the particular operation against its target or receipt, record the decision, and continue. Upgrading does not retroactively certify old holds. Elapsed time cannot establish whether a write took effect. Hard termination before a dynamically recognized reader returns can still leave a review item, because its final identity and mode could not be checked. Recovery never resends the old call.
+Open the local manager and choose **查看并处理 / Review pending operations**. Verify the particular operation against its target or receipt and record the decision. Upgrading preserves old holds. A declared read interrupted after its 0.3.12 provider-entry marker can be settled automatically. An interrupted write without a receipt still needs review. Recovery never resends the old call.
 
 Literal-only diagnostic shell commands in a conservative supported subset, and working-directory reads with no cd argument, remain available while an external write awaits review. Unsupported shell syntax stays gated. Missing results from a recognized read-only diagnostic do not create an external-write quarantine after restart. Review never silently replays an old action.
 

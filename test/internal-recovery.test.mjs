@@ -18,14 +18,13 @@ test('实际外部操作和未知自定义cm工具仍需要核查，不能放行
   const callId='external-'+i;journal.observe(f.lib.id,'owner',{type:'tool/call',seq:i*2,data:{call:{callId,name,arguments:{path:'synthetic.txt'}}}})
   journal.observe(f.lib.id,'owner',{type:'tool/result',seq:i*2+1,data:{callId,isError:true,error:{code:'TOOL_OUTCOME_UNKNOWN'}}})
  }
- assert.equal(journal.pending(f.lib.id).operations.length,2);assert.throws(()=>journal.assertTool(f.lib.id,'write',{}),{code:'RECOVERY_REVIEW_REQUIRED'});assert.doesNotThrow(()=>journal.assertTool(f.lib.id,'cm_read',{}))
+ assert.equal(journal.pending(f.lib.id).operations.length,2);assert.throws(()=>journal.assertTool(f.lib.id,'write',{}),{code:'RECOVERY_REVIEW_REQUIRED'});assert.doesNotThrow(()=>journal.assertTool(f.lib.id,'cm_read',{},true))
 })
-test('旧版本遗留的内部未知标记恢复后不继续卡写，真实外部未知仍保留',t=>{
+test('unverified historical names cannot clear a review on restart',t=>{
  const f=fixture(t),insert=f.store.db.prepare('INSERT INTO cm_tool_operations(library,session,call_id,name,args_digest,readonly,status,time) VALUES(?,?,?,?,?,0,?,?)')
  insert.run(f.lib.id,'owner','old-control','cm_working','synthetic','uncertain',Date.now());insert.run(f.lib.id,'owner','old-external','write','synthetic','uncertain',Date.now());f.store.recovery.startup()
- assert.equal(f.store.db.prepare('SELECT status FROM cm_tool_operations WHERE call_id=?').get('old-control').status,'settled')
- assert.deepEqual(f.store.recovery.pending(f.lib.id).operations.map(o=>o.call_id),['old-external'])
- const audit=f.store.db.prepare("SELECT detail FROM audit WHERE type='internal-control-recovered'").get();assert.equal(JSON.parse(audit.detail).commit_assumed,false)
+ assert.equal(f.store.db.prepare('SELECT status FROM cm_tool_operations WHERE call_id=?').get('old-control').status,'uncertain')
+ assert.deepEqual(f.store.recovery.pending(f.lib.id).operations.map(o=>o.call_id).sort(),['old-control','old-external'])
 })
 test('缺少原文ID和拼错的超长hex ID给出输入错误，不泄漏SQLite参数异常',t=>{
  const f=fixture(t)
