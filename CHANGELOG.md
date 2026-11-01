@@ -1,5 +1,11 @@
 # Changes
 
+## 0.3.13
+
+- Compare the requested topic with competing passages before selecting automatic working-memory cards. Keep shared project labels separate from discriminating evidence, permit a clear semantic lead, and keep the broader manual search available.
+- Match an explicit resume request to one sourced checkpoint. Put its actual next step ahead of background material. Allow at most one in-turn reminder when no execution was attempted. Recovery holds, new input, ambiguous checkpoints and missing permissions do not start work.
+- Journal matching tool attempts by checkpoint revision, provider call and argument digest. Repeated dispatch of the same recorded operation is blocked. For tracked external steps, marking the checkpoint done requires citing the successful native result. The application's actual artifact or receipt still needs verification.
+
 ## 0.3.12
 
 - Match official search, file and directory tools to their active provider and distinguish diagnostic PowerShell arguments from write modes. Scoped same-name replacements cannot inherit a recovery permit. Unknown historical outcomes retain their review decision boundary.

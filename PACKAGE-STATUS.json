@@ -1,11 +1,11 @@
 {
   "project": "Returning Tide Memory",
   "package": "dsh-returning-tide-memory",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "license": "MIT",
   "schema": 3,
-  "offline_tests": 443,
-  "syntax_files": 92,
+  "offline_tests": 451,
+  "syntax_files": 95,
   "privacy_audit": "passed",
   "fresh_public_history": true,
   "baseline_engine_evidence": {

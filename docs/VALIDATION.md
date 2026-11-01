@@ -1,5 +1,13 @@
 # Validation
 
+## 0.3.13 release gate
+
+The packaged plugin is exercised with a local embedding model and real DeepSeek dialogue through the DSH SDK. Each test has an isolated source session, a clean receiving session and an explicit library handoff. The receiving model cannot read the answer file, unrelated libraries or arbitrary files. The harness commits the questions, random identifiers, relevant source labels and expected artifact contents before the first turn. It checks both the first outgoing model request and the final answer. The broad manual lookup is measured separately.
+
+The release gate requires 12 scored questions, zero out-of-scope automatic cards, a useful automatic source on each positive or status-only question, no unsourced award claims and no writer entry on inquiry-only cases. All four action cases require the expected file bytes, an independently recomputed SHA-256 matching the answer, exactly one executor entry, and a successful host ledger row with its native result reference. The bounded suite is a regression test on synthetic data, not an estimate of general accuracy.
+
+For a deterministic test of premature stopping, set `DSH_SDK_RUNTIME` and run `node test/native-failure-host.mjs --desktop-preset --resume-stop`. The scripted adapter first returns text without taking action. The real host must accept exactly one producer-tagged next-step reminder in that turn, run the proof tool once and archive its real result. The test also verifies that the reminder is absent from archived human sources.
+
 ## 0.3.12 isolated-host acceptance
 
 Global and standard-preset profiles exercise genuine grep, glob and foreground PowerShell diagnostics during review, plus same-name replacements that would write a local marker. Each replacement must be denied before its body runs. The process-interruption runner kills only its isolated child after provider entry. Two consecutive journal reopens must keep a declared read out of review and preserve uncertainty for a mixed-mode write and a shadow search that wrote first.

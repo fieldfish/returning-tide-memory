@@ -11,7 +11,7 @@ function fixture(t,config={}){
   const dir=mkdtempSync(join(tmpdir(),'continuity-working-test-'));let now=Date.parse('2026-10-29T08:00:00Z'),calls=0,answer=null
   const store=new ContinuityStore(dir,{now:()=>now}),lib=store.create('合成实验'),other=store.create('隔离库');store.bind('owner',lib.id,0)
   const append=(text,seq=1,extra={})=>store.append(lib.id,{session:'history',seq,time:new Date(now+seq*1000).toISOString(),role:'user',text,...extra})
-  const embedding={lookup:async(...args)=>{calls++;assert.deepEqual(args[6],{readOnlyIndex:true,details:true});return typeof answer==='function'?answer(...args):answer||{results:[],candidates:[]}}}
+  const embedding={lookup:async(...args)=>{calls++;assert.deepEqual(args[6],{readOnlyIndex:true,details:true,automatic:true});return typeof answer==='function'?answer(...args):answer||{results:[],candidates:[]}}}
   const scenes=new Scenes(store),working=new WorkingMemory(store,embedding,scenes,{enabled:true,...config})
   const hit=(id,semantic=.9,lexical=true)=>{answer={results:[{id:store.shortId(lib.id,id),title:'合成资料',score:.02,summary:Array.from(store.record(lib.id,id).text).slice(0,20).join(''),time:'2026-10-29 16:00'}],candidates:[{id,semantic,lexical,exact:false}]}}
   const prepare=(query='还记得蓝色小屋吗',seq=10,extra={})=>working.prepare({library:lib.id,session:'owner',query,userSeq:seq,turnSeq:seq,...extra})
@@ -33,7 +33,7 @@ test('A pending message ID survives persistence, clear does not suppress the nex
 })
 test('Incomplete index remains visible even when some admissible cards are ready',async t=>{
  const f=fixture(t),id=f.append('蓝色小屋只有合成草稿');f.hit(id)
- const result=await f.working.embedding.lookup(null,null,null,null,null,null,{readOnlyIndex:true,details:true});f.setAnswer({...result,incomplete:true,index:{indexed:8,pending:2,unprepared:1}})
+ const result=await f.working.embedding.lookup(null,null,null,null,null,null,{readOnlyIndex:true,details:true,automatic:true});f.setAnswer({...result,incomplete:true,index:{indexed:8,pending:2,unprepared:1}})
  await f.prepare();const view=f.working.view(f.lib.id,'owner');assert.equal(view.status,'ready');assert.equal(view.index_incomplete,true);assert.equal(view.index.pending,2)
 })
 
@@ -77,6 +77,16 @@ test('高相关候选提升为预算内工作集，同条用户消息多步不�
 test('仅话题相近的弱候选不自动注入，分数不当成事实',async t=>{
   const f=fixture(t),id=f.append('我看过普通地质视频');f.hit(id,.55,true)
   await f.prepare('我上周买的火星土壤是哪种');assert.equal(f.working.context(f.lib.id,'owner'),'');assert.equal(f.working.status(f.lib.id,'owner').frame.status,'no-admissible-evidence')
+})
+test('a uniquely selected checkpoint drops neighboring plan cards but preserves their originals',async t=>{
+  const f=fixture(t),draft=f.append('测点名录已经保存；待生成校样',1),other=f.append('同一项目计划送修设备',2)
+  const ids=[draft,other]
+  f.setAnswer({results:ids.map(id=>({id:f.store.shortId(f.lib.id,id),summary:'fixture'})),candidates:ids.map(id=>({id,semantic:.9,lexical:true}))})
+  await f.prepare('查看测点名录进度，只汇报仍在计划中的步骤',10)
+  assert.equal(f.working.view(f.lib.id,'owner').cards.length,2)
+  f.working.focusCheckpoint(f.lib.id,'owner',{task:'survey',revision:1,refs:[draft]})
+  assert.deepEqual(f.working.view(f.lib.id,'owner').source_ids,[draft])
+  assert.equal(f.store.record(f.lib.id,other).text,'同一项目计划送修设备')
 })
 test('明确换话题立即退出旧工作集，不把旧材料带到下一题',async t=>{
   const f=fixture(t),id=f.append('蓝色小屋');f.hit(id);await f.prepare();assert.match(f.working.context(f.lib.id,'owner'),/蓝色小屋/)

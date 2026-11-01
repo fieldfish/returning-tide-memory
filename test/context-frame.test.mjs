@@ -58,7 +58,7 @@ test('普通轮次预算800字符，保留当前线索；背景任务只保留�
 test('恢复尾段排除当前问题；不凭当前问题构造历史答案',async t=>{
   const f=fixture(t);f.append('旧的真实原文',{session:'owner',seq:1});f.append('当前虚构问题',{session:'owner',seq:50})
   await f.working.prepare({library:f.lib.id,session:'owner',query:'当前虚构问题',userSeq:50,turnSeq:40})
-  assert.doesNotMatch(f.render(),/当前虚构问题/);assert.match(f.render(),/旧的真实原文/)
+  assert.doesNotMatch(f.render(),/当前虚构问题|旧的真实原文/);assert.equal(f.store.recent(f.lib.id,'owner',10).length,2)
 })
 test('出现未确认外部动作时，预算先保留核对保护；不重复写入恢复日志',async t=>{
   const f=fixture(t),id=f.append('背景资料'),s=f.situations.create(f.lib.id,'owner',{title:'一件事',refs:[id]});f.situations.focus(f.lib.id,'owner',s.id)

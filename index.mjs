@@ -9,6 +9,7 @@ import { Extraction, EXTRACTION_SYSTEM, normalizeUsage } from './lib/extraction.
 import {Evidence,EVIDENCE_SYSTEM} from './lib/evidence.mjs'
 import {ExecutionLedger} from './lib/execution.mjs'
 import {createToolContracts,guardHostRead} from './lib/tool-contracts.mjs'
+import {CheckpointResume} from './lib/checkpoint-resume.mjs'
 import {readOnlyTool,localRecoveryTool} from './lib/recovery.mjs'
 import {Scenes} from './lib/scenes.mjs'
 import {WorkingMemory} from './lib/working-memory.mjs'
@@ -43,13 +44,13 @@ export async function createPlugin(ctx, config = {}, options = {}) {
 }
 async function initializePlugin(ctx,config,options,resources){
   if (!ctx.tools?.register || !ctx.agents?.get || !ctx.sessions?.flush || typeof ctx.on!=='function' || typeof ctx.effect!=='function') fail('HOST_API_UNAVAILABLE','缺少官方会话、工具或生命周期接口；未改动原人格或配置')
-  let isLoop=options.isAgentLoopRequest
+  let isLoop=options.isAgentLoopRequest,makeMessage=options.createUserMessage
   if(!isLoop){
-    try{isLoop=(await import('@deepseek-ai/dsh-llm')).isAgentLoopRequest}
+    try{({isAgentLoopRequest:isLoop,createUserMessage:makeMessage}=await import('@deepseek-ai/dsh-llm'))}
     catch(e){
       if(!config.runtimePackageJson)fail('HOST_API_UNAVAILABLE','找不到现场DSH SDK；需提供runtimePackageJson')
       const require=createRequire(resolve(config.runtimePackageJson))
-      isLoop=(await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm')).href)).isAgentLoopRequest
+      ;({isAgentLoopRequest:isLoop,createUserMessage:makeMessage}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm')).href))
     }
   }
   if(typeof isLoop!=='function') fail('HOST_API_UNAVAILABLE','需要 isAgentLoopRequest 以区分主模型和辅助调用')
@@ -115,7 +116,7 @@ async function initializePlugin(ctx,config,options,resources){
   embedding.lexicalIndex.ensureActivityTriggers()
   const scenes=new Scenes(store),situations=new Situations(store,scenes)
   const situationIndex=new SituationIndex(store,situations,embedding,config.situationIndex)
-  const working=new WorkingMemory(store,embedding,scenes,config.workingMemory,situationIndex),contextFrame=new ContextFrame(store,working,situations,execution,activityArchive)
+  const working=new WorkingMemory(store,embedding,scenes,config.workingMemory,situationIndex),resume=new CheckpointResume(store,working),contextFrame=new ContextFrame(store,working,situations,execution,activityArchive,resume)
   const toolContext=new ToolContext(working)
   const consolidation=new Consolidation(store,situations,extraction,situationIndex)
   store.db.exec('CREATE TABLE IF NOT EXISTS cm_maintenance_turns(library TEXT PRIMARY KEY,last_kind TEXT NOT NULL)')
@@ -311,7 +312,7 @@ async function initializePlugin(ctx,config,options,resources){
     if(a.action==='defer')return {review:store.defer(id,session,a.key,a.revision??a.expected_revision,a.reason)}
     fail('INVALID_INPUT','未知自我状态操作')
   })
-  register('cm_checkpoint','保存真实任务进度。read查看，write写入新版本，write必须带task、value和refs。value.status只用planned/running/paused/blocked/review/done/cancelled；value.progress写已经核实的进度；未done/cancelled时必须带value.next_step。只恢复线索，不自动重放动作。',object({action:{type:'string',enum:['read','write'],description:'read查看或write保存'},task:str('任务键，同一任务沿用原键'),value:{type:'object',properties:{status:{type:'string',enum:['planned','running','paused','blocked','review','done','cancelled'],description:'计划planned，进行running，暂停paused，受阻blocked，待审review，完成done，取消cancelled'},progress:str('已经发生或完成的进度，不把计划写成结果'),next_step:str('下一步；status不是done/cancelled时必填')},required:['status','progress'],additionalProperties:true},refs:{type:'array',items:{type:'string'},description:'write必填，1—20个支持当前进度的本库原文ID'},expected_revision:num('上一版本，首次0；更新时先read核对'),offset:num('read字符偏移'),limit:num('read字符上限')},['action']),async(a,e)=>{const{id,session}=owned(e);if(a.action==='read'){const tasks=store.tasks(id);return a.task?{task:page(JSON.stringify(tasks.find(t=>t.task===a.task)||null),a.offset??0,a.limit??2000)}:{tasks:tasks.slice(0,10).map(taskBrief)}};if(a.action==='write')return {checkpoint:store.checkpoint(id,session,a.task,a.value,a.refs,a.expected_revision??0)};fail('INVALID_INPUT','未知检查点操作')})
+  register('cm_checkpoint','保存真实任务进度。read查看，write写入新版本，write必须带task、value和refs。value.status只用planned/running/paused/blocked/review/done/cancelled；value.progress写已经核实的进度；未done/cancelled时必须带value.next_step。只恢复线索，不自动重放动作。',object({action:{type:'string',enum:['read','write'],description:'read查看或write保存'},task:str('任务键，同一任务沿用原键'),value:{type:'object',properties:{status:{type:'string',enum:['planned','running','paused','blocked','review','done','cancelled'],description:'计划planned，进行running，暂停paused，受阻blocked，待审review，完成done，取消cancelled'},progress:str('已经发生或完成的进度，不把计划写成结果'),next_step:str('下一步；status不是done/cancelled时必填'),next_tool:str('可选，下一步实际使用的宿主工具名；不会授予权限')},required:['status','progress'],additionalProperties:true},refs:{type:'array',items:{type:'string'},description:'write必填，1—20个支持当前进度的本库原文ID'},expected_revision:num('上一版本，首次0；更新时先read核对'),offset:num('read字符偏移'),limit:num('read字符上限')},['action']),async(a,e)=>{const{id,session}=owned(e);if(a.action==='read'){const tasks=store.tasks(id);return a.task?{task:page(JSON.stringify(tasks.find(t=>t.task===a.task)||null),a.offset??0,a.limit??2000)}:{tasks:tasks.slice(0,10).map(taskBrief)}};if(a.action==='write'){resume.checkCompletion(id,session,a);return {checkpoint:store.checkpoint(id,session,a.task,a.value,a.refs,a.expected_revision??0)}};fail('INVALID_INPUT','未知检查点操作')})
   register('cm_extraction','配置提炼及手动resume/pause/status。situationsEnabled另允许后台情境整理，与提炼、证据核验共用日调用预算；配置保存后两类整理均暂停，分别resume。密钥仅用环境变量引用，不填写密钥值。失败和限额后不自动重试或换源。',object({action:str('configure/resume/pause/status'),config:{type:'object',additionalProperties:true}},['action']),async(a,e)=>{
     const{id,session}=owned(e)
     if(a.action==='configure')return store.tx(()=>{const result=extraction.configure(id,session,a.config);consolidation.pause(id);return result})
@@ -420,20 +421,28 @@ async function initializePlugin(ctx,config,options,resources){
     try {
       signal?.throwIfAborted();execution.reconcileNativeResults(id,agent.session);capture.backfill(id,agent.session);attach(agent);const decision=await next()
       if(decision.kind!=='enter'){if(fresh)releaseMain(session);return decision}
-      if(working.config.enabled){
+      const incoming=pendingUserMessage(payload.messages)
+      if(working.config.enabled||incoming){
         const user=store.db.prepare("SELECT seq,text FROM records WHERE library=? AND session=? AND role='user' ORDER BY seq DESC LIMIT 1").get(id,session)
         const events=agent.session?.snapshotEvents?.()||[],turn=events.findLast(ev=>ev.type==='turn/start'),turnSeq=turn?.seq??user?.seq??0
-        const incoming=pendingUserMessage(payload.messages)
         const persisted=user?events.findLast(ev=>ev.type==='user/message'&&ev.seq===user.seq):null
         const persistedId=(persisted?.data?.message||persisted?.data)?.id
         const userKey=incoming?'message:'+(incoming.id||hash([turnSeq,incoming.text])):typeof persistedId==='string'?'message:'+persistedId:null
-        const event=working.takeTrigger(id,session,turnSeq)
+        if(incoming)working.triggers.delete(session)
+        const event=incoming?null:working.takeTrigger(id,session,turnSeq)
         if(incoming||user||event)await working.prepare({library:id,session,query:event?.query||incoming?.text||user?.text||'',userSeq:incoming?null:user?.seq??turnSeq,userKey,turnSeq,signal,event})
+        if(incoming)resume.begin(id,agent,turn?.data?.turn,incoming.text,turnSeq)
       }
       return decision
     }
     catch(e){if(fresh)releaseMain(session);store.pause(id,e.code||'PRE_STEP_FAILED');throw e}
   },{prepend:true}))
+  disposers.push(ctx.on('agent/turn-stopping',({agent,turn,signal})=>{
+    const session=SID(agent),id=libraryFor(session)
+    if(closed||!id||signal?.aborted||!makeMessage||!agent.inject||transfers.has(id)||hasRunningChildren(session))return
+    const note=resume.remind(id,agent,turn)
+    if(note)agent.inject(makeMessage({source:{kind:'returning-tide-memory'},content:[{type:'text',text:note}]}))
+  }))
   disposers.push(ctx.on('agent/request-error',async({agent,failure},next)=>{
     const session=SID(agent),id=libraryFor(session);if(!id)return next()
     // End this failed request without retrying. A provider transport failure is
@@ -466,12 +475,12 @@ async function initializePlugin(ctx,config,options,resources){
         const usage=normalizeUsage(event.data?.usage,'dsh')
         store.db.prepare('INSERT OR IGNORE INTO usage(id,library,source,status,input,output,cache_read,cache_write,time) VALUES(?,?,?,?,?,?,?,?,?)').run(hash(`${session.id}:${event.seq}`),id,'main','completed',usage?.input??null,usage?.output??null,usage?.cache_read??null,usage?.cache_write??null,typeof event.time==='number'?event.time:Date.parse(event.time))
       }
-      if(event.type==='turn/end')releaseMain(session.id)
+      if(event.type==='turn/end'){resume.clear(session.id);releaseMain(session.id)}
     }catch(e){store.pause(id,e.code||'CAPTURE_FAILED');notifyError(session.id,e.code||'CAPTURE_FAILED')}
   }
   disposers.push(ctx.on('agent/created',({agent,source})=>{const id=libraryFor(SID(agent));if(id){if(source==='compact')store.markCompacted(SID(agent));attach(agent);scheduleEmbedding(agent)}}))
   disposers.push(ctx.on('agent/status',({agent,status})=>{if(status==='idle'){releaseMain(SID(agent));void idleExtraction(agent);void idleEmbedding(agent)}else{const id=libraryFor(SID(agent));if(id)embeddingJobs.get(id)?.abort()}}))
-  disposers.push(ctx.on('agent/disposed',({agent})=>{releaseMain(SID(agent));toolContext.clear(SID(agent));const d=seen.get(agent)?.dispose;if(typeof d==='function')d();seen.delete(agent)}))
+  disposers.push(ctx.on('agent/disposed',({agent})=>{resume.clear(SID(agent));releaseMain(SID(agent));toolContext.clear(SID(agent));const d=seen.get(agent)?.dispose;if(typeof d==='function')d();seen.delete(agent)}))
   // Proof sources for "the tool body never ran": the resolved definition identity and the host's own
   // FS edit-intent stage. A tool body can throw the same codes, so neither name nor code is enough.
   const contracts=await createToolContracts(ctx,config.runtimePackageJson)
@@ -502,6 +511,7 @@ async function initializePlugin(ctx,config,options,resources){
     if(localDefinitions.has(call.name)&&!local)fail('TOOL_IDENTITY_CHANGED','The visible memory tool could not be verified')
     const localRead=local&&readOnlyTool(call.name,call.arguments)
     const permitted=before.readOnly===true||localRead||local&&localRecoveryTool(call.name,call.arguments)
+    if(!local&&!before.readOnly)resume.assertAction(managed,parent?.session||session,call.name)
     store.recovery.assertTool(managed,call.name,exec.arguments,permitted)
     const argsAtDispatch=before.stamp||permitted?hash(JSON.stringify(exec.arguments)??'undefined'):null
     const invalidArguments=!!before.origin&&definitelyInvalidArguments(before.definition.parameters,exec.arguments)
@@ -525,7 +535,10 @@ async function initializePlugin(ctx,config,options,resources){
           schema_rejected:invalidArguments,fs_intent:sameIntent?(intent.rejected?'rejected':'accepted'):'not-observed'}
       }
     }
-    execution.start(managed,session,call,localRead||!!before.origin&&before.readOnly)
+    const active=id&&resume.current(id,session)?.active
+    const attempt=active&&!local&&(!before.readOnly||active.tool===call.name)
+    if(attempt)active.attempted=true
+    execution.start(managed,session,call,localRead||!!before.origin&&before.readOnly,attempt?active:null)
     const failureRecall=()=>{if(!/^cm_/.test(exec.name||'')){const owner=parent?.session||session;working.signalEvent(managed,owner,'tool-failure',exec.callId||exec.name,'工具 '+clip(exec.name,100)+' 失败；核对过去相同工具的错误、处理办法与当前任务')}}
     let result
     try{

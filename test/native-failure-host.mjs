@@ -43,11 +43,19 @@ try{
      {...shipped,config:{...shipped.config,plugins}}]})
  }
  writeFileSync(join(profile,'cordis.patch.yml'),yaml.dump(patch));process.env.DSH_HOME=home;process.env.DSH_TELEMETRY_DISABLED='1';process.chdir(workspace)
- const {runProfile}=await load('@deepseek-ai/dsh/profile-boot'),{createLaunchEnvironmentSnapshot}=await load('@deepseek-ai/dsh-launch-environment'),{LlmAdapter}=await load('@deepseek-ai/dsh-llm')
+ const {runProfile}=await load('@deepseek-ai/dsh/profile-boot'),{createLaunchEnvironmentSnapshot}=await load('@deepseek-ai/dsh-launch-environment'),{LlmAdapter,createUserMessage}=await load('@deepseek-ai/dsh-llm')
  boot=await runProfile({environment:createLaunchEnvironmentSnapshot([{source:'process',values:{...process.env}}]),profile:'pending-test',patchFiles:[],args:[]})
  class Synthetic extends LlmAdapter{
   async resolveModel(provider,model){return {provider,id:model,name:model,context:{contextWindow:100000},systemPromptUpdate:'in-history'}}
-  async *stream(options){report.requests.push(structuredClone({...options,signal:undefined}));yield {type:'text-delta',text:'Synthetic response; no external actions.'};yield {type:'finish',reason:{kind:'stop'}}}
+  async *stream(options){
+    report.requests.push({message_count:options.messages?.length})
+    if(process.argv.includes('--resume-stop')&&report.requests.length===2){
+      assert.ok(JSON.stringify(options.messages).includes('本轮任务仍只有历史进度'))
+      yield {type:'tool-call-delta',index:0,id:'fixture-resume-effect',name:'write_proof',argumentsDelta:'{}'}
+      yield {type:'finish',reason:{kind:'tool-calls'}};return
+    }
+    yield {type:'text-delta',index:0,text:'Synthetic response.'};yield {type:'finish',reason:{kind:'stop'}}
+  }
  }
  boot.ctx.llm.registerAdapter(['synthetic-pending'],new Synthetic())
  handle=await boot.ctx.agents.create({sessionId:sid,meta:{cwd:workspace},agentOptions:{provider:'synthetic-pending',model:'synthetic-model',maxTokens:300}})
@@ -263,6 +271,25 @@ try{
      report.upstream_video={version:'1.4.3',metadata_verified:true,real_pngs:images,undeclared_blocked:true,adapted_probe_allowed:true,storyboard_blocked_during_review:true}
      await clear()
    }finally{unmount()}
+ }
+ if(process.argv.includes('--resume-stop')){
+   let effects=0
+   const proof=join(workspace,'proof-output.txt'),remove=agent.ctx.tools.register({...videoDefinition,name:'write_proof',
+     parameters:{type:'object',properties:{},additionalProperties:false},execute(){writeFileSync(proof,'verified bytes',{flag:'wx'});effects++;return {ok:true}}})
+   try{
+     assert.equal((await native('cm_checkpoint',{action:'write',task:'proof_task',value:{status:'paused',progress:'Fixture prepared',next_step:'Write the proof file',next_tool:'write_proof'},refs:[old],expected_revision:0})).isError,false)
+     agent.followup(createUserMessage({source:{kind:'user'},content:[{type:'text',text:'Resume proof_task using write_proof.'}]}))
+     await agent.whenIdle();await boot.ctx.sessions.flush(agent.session)
+     assert.equal(effects,1);assert.equal(report.requests.length,3)
+     assert.equal(readFileSync(proof,'utf8'),'verified bytes')
+     const audit=new DatabaseSync(join(directory,'continuity.sqlite3'),{readOnly:true})
+     try{
+       const op=audit.prepare("SELECT o.status,o.result_ref FROM cm_checkpoint_attempts a JOIN cm_tool_operations o USING(library,session,call_id) WHERE a.call_id='fixture-resume-effect'").get()
+       assert.equal(op.status,'succeeded');assert.ok(op.result_ref)
+       assert.equal(audit.prepare("SELECT count(*) n FROM records WHERE role='user' AND text LIKE '%本轮任务仍只有历史进度%'").get().n,0)
+     }finally{audit.close()}
+     report.forced_resume={initial_reply_without_action:true,reminders:1,tool_effects:effects,native_receipt:true}
+   }finally{remove()}
  }
  report.failures=failures
  assert.deepEqual(failures,[])

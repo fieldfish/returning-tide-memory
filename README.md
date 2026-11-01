@@ -4,6 +4,8 @@
 
 Local long-term retrieval, contextual working memory, and sourced continuity for DSH.
 
+Version 0.3.13 adds contrastive working-memory admission and receipt-linked checkpoint resumption. See [working memory and checkpoint execution](docs/WORKING-RESUME.md).
+
 Version 0.3.12 verifies scoped reader identity during recovery and journals registered read entry before provider execution. See the [recovery guide](docs/RECOVERY.md).
 
 **Status: Completed — stable release.** See [release status](RELEASE-STATUS.md) and [implemented scope](docs/STATUS.md).
