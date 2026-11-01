@@ -1,0 +1,92 @@
+{
+  "release": "0.3.10",
+  "baseline": "0.3.9",
+  "date": "2026-11-01",
+  "node": "v24.22.1",
+  "platform": "win32",
+  "cpu": "13th Gen Intel(R) Core(TM) i7-13650HX",
+  "ramGiB": 15.692092895507812,
+  "dimensions": 1024,
+  "queries": [
+    "QPROJ00000012",
+    "水杉计划",
+    "珊瑚档案",
+    "QPROJ00000421",
+    "海洋笔记",
+    "QPROJ00001987",
+    "不存在的蜂蜜菜谱",
+    "散步记录",
+    "QPROJ00003301",
+    "蓝灰台灯",
+    "QPROJ00007654",
+    "不存在的月球咖啡"
+  ],
+  "modelCalls": 0,
+  "method": "12 distinct queries, two measured passes per version, two unmeasured warm-ups; precomputed synthetic vectors; top-5 full lookup; baseline always first",
+  "primary": [
+    {
+      "count": 10000,
+      "checks": 24,
+      "identicalCards": true,
+      "baseline": {
+        "medianMs": 409.6324000000004,
+        "p95Ms": 449.7207999999998,
+        "peakRssKiB": 93328,
+        "setupMs": 10.134599999999999,
+        "databaseGrowthBytes": 0
+      },
+      "indexed": {
+        "medianMs": 376.0453500000001,
+        "p95Ms": 467.8247000000006,
+        "peakRssKiB": 90996,
+        "setupMs": 1886.7133999999999,
+        "databaseGrowthBytes": 11374592
+      }
+    },
+    {
+      "count": 50000,
+      "checks": 24,
+      "identicalCards": true,
+      "baseline": {
+        "medianMs": 2299.544,
+        "p95Ms": 3004.0910000000003,
+        "peakRssKiB": 114052,
+        "setupMs": 6.746400000000001,
+        "databaseGrowthBytes": 0
+      },
+      "indexed": {
+        "medianMs": 1992.6182500000014,
+        "p95Ms": 2601.3269999999975,
+        "peakRssKiB": 114912,
+        "setupMs": 12557.619700000001,
+        "databaseGrowthBytes": 59367424
+      }
+    }
+  ],
+  "additional_snapshot": {
+    "count": 10000,
+    "checks": 24,
+    "identicalCards": true,
+    "baseline": {
+      "medianMs": 486.8331500000006,
+      "p95Ms": 637.6179999999995,
+      "peakRssKiB": 91972,
+      "setupMs": 9.252499999999998,
+      "databaseGrowthBytes": 0
+    },
+    "indexed": {
+      "medianMs": 356.5994499999997,
+      "p95Ms": 479.4344000000001,
+      "peakRssKiB": 92564,
+      "setupMs": 2338.5398999999998,
+      "databaseGrowthBytes": 11374592
+    }
+  },
+  "limits": [
+    "One local Windows computer; shared CPU scheduling and warm filesystem state can affect sequential measurements.",
+    "Query embedding, model quality, cloud latency and end-to-end dialogue latency are excluded.",
+    "Exact card equality checks this synthetic corpus; it does not prove general recall accuracy.",
+    "Setup cost uses synchronous benchmark backfill; production uses cancellable idle batches and can take longer.",
+    "The repeated 10k run had a slower indexed p95; no claim that every query becomes faster."
+  ]
+}

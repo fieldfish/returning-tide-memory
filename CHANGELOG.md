@@ -1,5 +1,13 @@
 # Changes
 
+## 0.3.10
+
+- Add a persistent lexical candidate index using Chinese character pairs and ASCII pair/four-character windows. Verify candidates against current full text before applying the existing hybrid ranking and evidence filters.
+- Maintain sources incrementally in cancellable idle batches. Pending and oversized sources remain candidates, preserving long-message tail matches during backfill. Updates, deletion, activity payload changes and restart retain a searchable path.
+- Join lexical maintenance to the existing lifecycle queue so unload waits for it. Avoid unnecessary vector maintenance on empty libraries and fix the foreground-cancellation regression fixture to create real pending work.
+- Add a reproducible 0.3.9 versus current benchmark on 10,000 and 50,000 synthetic sources with 1,024-dimensional precomputed vectors. Publish latency, process RSS, index growth, build costs and exact returned-card comparisons.
+- Document component ownership and remaining architecture gaps. The index uses local SQLite operations and makes no model calls.
+
 ## 0.3.9
 
 - Make the idle-maintenance continuation test advance the real scheduling callbacks with a controlled clock instead of a 1.5-second wall-clock deadline. Preserve completion assertions and additionally verify that pausing prevents further model calls.

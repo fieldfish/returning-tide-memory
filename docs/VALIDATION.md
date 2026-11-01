@@ -32,3 +32,7 @@ Set DSH_SDK_RUNTIME to an installed runtime directory and run npm run test:reloa
 ## 0.3.9 CI timing hotfix
 
 422/422 local tests pass with the optional SDK enabled. The idle-maintenance test now advances real scheduler callbacks with a controlled clock, asserts that every batch completes, and verifies that pause prevents further model calls. An isolated mutation that removes continuation fails this same test, confirming the fix does not hide a broken scheduler. The runner executes all test files with two concurrent workers. Runtime source files are unchanged from 0.3.8; the earlier native-host and UI evidence applies to that identical runtime, rather than being claimed as newly repeated.
+
+## 0.3.10 lexical index
+
+434 offline tests with the optional official SDK enabled cover the normal retrieval entry point, pending and built indexes, long-record tails, ASCII substrings, raw QQ preservation, semantic-only recall, retired sources, payload insert/update/delete, transaction rollback, reopen, cancellation during a yielded turn, foreground priority and disposal barriers. The SDK refusal/reload runners and 14 tool schemas plus bilingual management flows were rerun against this runtime. Measured synthetic performance and its limits are in [LEXICAL-BENCHMARK.md](LEXICAL-BENCHMARK.md).

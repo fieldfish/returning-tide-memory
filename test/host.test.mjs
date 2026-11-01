@@ -507,12 +507,30 @@ test('空闲向量维护会分批补齐，用户开始新轮后停止继续调�
  const until=Date.now()+1500;while(pending>0&&Date.now()<until)await new Promise(r=>setTimeout(r,20))
  assert.equal(pending,0);assert.equal(calls,3);await new Promise(r=>setTimeout(r,550));assert.equal(calls,3);assert.equal(h.plugin.store.library(lib.id).error,null)
 })
-test('Foreground pre-step cancels background embedding without pausing retrieval or blocking the turn',async t=>{
+test('Foreground pre-step cancels background embedding without pausing retrieval or blocking the turn',{timeout:20000},async t=>{
  const h=await harness(t,{workingMemory:{enabled:true}}),lib=await h.bind();let started,signal
  const entered=new Promise(r=>{started=r});h.plugin.embedding.warm=async(_l,_s,s)=>{signal=s;started();await new Promise((_r,reject)=>s.addEventListener('abort',()=>reject(Object.assign(Error('cancelled'),{code:'CANCELLED'})),{once:true}))}
- h.plugin.embedding.lookup=async()=>({results:[],candidates:[]});h.emit('agent/status',{agent:h.a,status:'idle'});await entered
+ h.plugin.embedding.lookup=async()=>({results:[],candidates:[]})
+ // Real backlog: the idle path only warms after indexing work exists, so archive a synthetic message first.
+ h.plugin.store.append(lib.id,{session:'history',seq:1,time:new Date().toISOString(),role:'user',text:'合成待索引原文，用于前台取消回归。'})
+ h.emit('agent/status',{agent:h.a,status:'idle'});await entered
  h.event(h.a,'user/message',{content:'现在查合成蓝色台灯'});await h.pre()
  assert.equal(signal.aborted,true);assert.equal(h.plugin.embedding.health(lib.id).paused,false);assert.equal(h.plugin.store.library(lib.id).error,null)
+})
+test('disposing during lexical maintenance waits for the lifecycle queue and does not touch a closed database',{timeout:20000},async t=>{
+ const h=await harness(t),lib=await h.bind()
+ h.plugin.store.append(lib.id,{session:'history',seq:1,time:new Date().toISOString(),role:'user',text:'合成维护原文，用于卸载屏障回归。'})
+ assert.equal(h.plugin.store.db.prepare("SELECT count(*) n FROM cm_tool_operations").get().n,0)
+ const index=h.plugin.embedding.lexicalIndex,original=index.buildBatchAsync.bind(index)
+ let release;const gate=new Promise(resolve=>{release=resolve})
+ index.buildBatchAsync=async(id,options)=>{await gate;return original(id,options)}
+ const running=h.plugin.idleEmbedding(h.a)
+ await new Promise(resolve=>setTimeout(resolve,20))
+ const disposing=h.plugin.dispose()
+ await new Promise(resolve=>setTimeout(resolve,20))
+ release()
+ await Promise.all([running,disposing])
+ assert.equal(h.plugin.store.closed,true,'dispose waits for the lexical maintenance queue before closing the store')
 })
 
 // --- Host proof for "the tool body never ran" -----------------------------------------------

@@ -72,3 +72,5 @@ The project is independent of desktop companion applications. Public examples us
 MIT. See [third-party notes](docs/THIRD-PARTY-NOTES.md). DSH owns the model loop; this package does not require LangGraph.
 
 Set DSH_SDK_RUNTIME to the installed runtime directory and run npm run test:native-failures to reproduce the synthetic native-tool refusal matrix. No directory links or live-chat messages are used.
+
+Lexical lookup in 0.3.10 uses a persisted pair/window candidate index and cancellable idle backfill. See [measured 10k/50k results and reproduction](docs/LEXICAL-BENCHMARK.md) and [component ownership](docs/ARCHITECTURE-MATRIX.md).

@@ -17,3 +17,7 @@ This stage addresses development reload/restart paths that lost a returned nativ
 ## 0.3.9 change scope
 
 This is a test-only reliability hotfix for the idle-maintenance CI deadline exposed in 0.3.8. It uses a controlled clock, retains continuation checks, strengthens pause checks and bounds test-worker concurrency. The runtime is byte-for-byte unchanged from 0.3.8. No live session or local installation is changed by publishing this source.
+
+## 0.3.10 change scope
+
+Persistent lexical candidates, bounded idle maintenance, lifecycle-safe cancellation and an independently checked before/after benchmark are complete within the documented scope. Full current text remains authoritative for matches. Pending and oversized sources use exact verification. Semantic search still scans stored vector parts, and source/model budgets remain finite.

@@ -72,3 +72,5 @@ MIT 开源，保留 [上游参考与许可说明](docs/THIRD-PARTY-NOTES.md)。D
 - 关系支持稳定游标与独立字符分页，完整保留关联和撤销依据；较早的已认可状态也可配对到最新认可版本，保留大小写、词间空格及关键标点。
 
 设置 DSH_SDK_RUNTIME 为本机 DSH runtime 目录后，运行 npm run test:native-failures，可复现原生工具失败分类矩阵。测试使用普通文件复制与独立临时环境，不连接真实会话；诊断资料保留在打印出的临时目录。
+
+0.3.10 加入持久化查词索引与可取消的空闲补建。参见[一万／五万条实测及复测方法](docs/LEXICAL-BENCHMARK.md)和[架构职责与缺口](docs/ARCHITECTURE-MATRIX.md)。

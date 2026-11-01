@@ -106,6 +106,7 @@ async function initializePlugin(ctx,config,options,resources){
   const evidence=new Evidence(store,embedding,extraction)
   const execution=new ExecutionLedger(store,{verifiers:options.verifiers})
   const activityArchive=new ActivityArchive(store,config.activityArchive);capture.activityArchive=activityArchive
+  embedding.lexicalIndex.ensureActivityTriggers()
   const scenes=new Scenes(store),situations=new Situations(store,scenes)
   const situationIndex=new SituationIndex(store,situations,embedding,config.situationIndex)
   const working=new WorkingMemory(store,embedding,scenes,config.workingMemory,situationIndex),contextFrame=new ContextFrame(store,working,situations,execution,activityArchive)
@@ -175,7 +176,13 @@ async function initializePlugin(ctx,config,options,resources){
     if(closed||!id||embeddingJobs.has(id)||agent.status!=='idle'||store.busy(id)||store.library(id).owner!==session||store.library(id).error||transfers.has(id)||hasRunningChildren(session))return
     const controller=new AbortController(),signal=AbortSignal.any([lifecycle.signal,controller.signal]);embeddingJobs.set(id,controller)
     try{
-      if(!embedding.health(id).paused)try{await embedding.warm(id,session,signal)}catch(e){if(!closed&&!signal.aborted){embedding.markFailure(id,e.code||'EMBEDDING_FAILED');ctx.logger?.warn?.('[continuity-core] 原文向量维护已暂停；聊天和原文采集可继续')}}
+      if(!embedding.health(id).paused)try{
+        // Lexical maintenance is part of the embedding lifecycle queue: dispose waits on the same
+        // exclusive barrier, so it cannot outlive the database. warm() takes the queue itself and
+        // must stay outside this exclusive call (nesting would deadlock).
+        await embedding.exclusive(signal,()=>embedding.lexicalIndex.buildBatchAsync(id,{signal}))
+        if(!signal.aborted&&!closed&&embedding.status(id).index_work_remaining)await embedding.warm(id,session,signal)
+      }catch(e){if(!closed&&!signal.aborted){embedding.markFailure(id,e.code||'EMBEDDING_FAILED');ctx.logger?.warn?.('[continuity-core] 原文向量维护已暂停；聊天和原文采集可继续')}}
       if(!closed&&!signal.aborted&&agent.status==='idle'&&store.library(id).owner===session&&situationIndex.enabled&&!situationIndex.health(id).paused)try{await situationIndex.warm(id,session,signal)}catch(e){if(!closed&&!signal.aborted)ctx.logger?.warn?.('[continuity-core] 情境向量维护已暂停；原文检索和聊天继续')}
     }finally{if(embeddingJobs.get(id)===controller)embeddingJobs.delete(id);scheduleEmbedding(agent)}
   }
@@ -183,7 +190,7 @@ async function initializePlugin(ctx,config,options,resources){
     if(closed)return
     const session=SID(agent),id=libraryFor(session)
     if(!id||embeddingTimers.has(id)||agent.status!=='idle'||store.library(id).owner!==session||store.library(id).error||transfers.has(id)||hasRunningChildren(session))return
-    const rawPending=!embedding.health(id).paused&&embedding.status(id).index_work_remaining
+    const rawPending=!embedding.health(id).paused&&(embedding.lexicalIndex.pending(id)>0||embedding.status(id).index_work_remaining)
     const situationPending=situationIndex.enabled&&!situationIndex.health(id).paused&&situationIndex.status(id).index_work_remaining
     if(!rawPending&&!situationPending)return
     const timer=setTimeout(()=>{embeddingTimers.delete(id);void idleEmbedding(agent)},500);timer.unref?.();embeddingTimers.set(id,timer)
