@@ -15,6 +15,23 @@ function fixture(t){
  t.after(()=>{store.close();rmSync(dir,{recursive:true,force:true})})
  return {dir,store,lib,ledger,call,op}
 }
+test('preflight refusals allow a corrected task call and cannot settle an existing attempt',t=>{
+ const f=fixture(t),id=f.lib.id,sid='owner',tool='third_party_render'
+ const task=f.ledger.plan(id,sid,'Sample task',[{id:'render',title:'Render a sample',tool}])
+ f.ledger.activate(id,sid,task.id,'render',0)
+ const bad=f.call('bad',tool,{count:'4'}),good=f.call('good',tool,{count:4})
+ const result=errorResult('INVALID_ARGS','ToolArgsError')
+ f.ledger.rejectArguments(id,sid,bad,result)
+ assert.equal(f.op('bad').status,'not_started');assert.equal(f.op('bad').stage,'schema-preflight')
+ assert.equal(f.store.recovery.needsReview(id),false)
+ f.ledger.start(id,sid,good)
+ assert.throws(()=>f.ledger.rejectArguments(id,sid,good,result),{code:'DUPLICATE_OPERATION'})
+ assert.throws(()=>f.ledger.rejectArguments(id,sid,{...good,arguments:bad.arguments},result),{code:'SOURCE_CHANGED'})
+ assert.equal(f.op('good').status,'running')
+ f.ledger.complete(id,sid,'good',result)
+ assert.equal(f.op('good').status,'uncertain')
+ assert.equal(f.store.recovery.needsReview(id),true)
+})
 test('ops_bash host metadata is benign while command analysis stays strict',()=>{
  assert.equal(readOnlyTool('ops_bash',{command:'cat README.md',workdir:'C:/synthetic'}),true)
  assert.equal(readOnlyTool('ops_bash',{command:'cat README.md',workdir:'C:/synthetic',run_in_background:false}),true)

@@ -55,13 +55,13 @@ async function initializePlugin(ctx,config,options,resources){
   }
   if(typeof isLoop!=='function') fail('HOST_API_UNAVAILABLE','需要 isAgentLoopRequest 以区分主模型和辅助调用')
   // Reuse the host's own schema rules. Missing SDK support is not proof of invalid arguments.
-  let validateToolArguments=options.validateJsonSchemaValue
-  if(typeof validateToolArguments!=='function'&&typeof ctx.loader?.import==='function'){
-    try{validateToolArguments=(await ctx.loader.import('@deepseek-ai/dsh-tools')).validateJsonSchemaValue}catch{}
+  let schemaTools=options
+  if(typeof schemaTools.validateJsonSchemaValue!=='function'&&typeof ctx.loader?.import==='function'){
+    try{schemaTools=await ctx.loader.import('@deepseek-ai/dsh-tools')||options}catch{}
   }
-  if(typeof validateToolArguments!=='function'){
-    try{validateToolArguments=(await import('@deepseek-ai/dsh-tools')).validateJsonSchemaValue}
-    catch{if(config.runtimePackageJson)try{const require=createRequire(resolve(config.runtimePackageJson));validateToolArguments=(await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-tools')).href)).validateJsonSchemaValue}catch{}}
+  if(typeof schemaTools.validateJsonSchemaValue!=='function'){
+    try{schemaTools=await import('@deepseek-ai/dsh-tools')}
+    catch{if(config.runtimePackageJson)try{const require=createRequire(resolve(config.runtimePackageJson));schemaTools=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-tools')).href)}catch{}}
   }
   const store = new ContinuityStore(resolve(config.dataDirectory || join(process.env.DSH_HOME || join(homedir(),'.dsh'),'continuity-core')),options.storeOptions)
   resources.store=store
@@ -485,9 +485,16 @@ async function initializePlugin(ctx,config,options,resources){
   // FS edit-intent stage. A tool body can throw the same codes, so neither name nor code is enough.
   const contracts=await createToolContracts(ctx,config.runtimePackageJson)
   disposers.push(ctx.on('internal/status',fiber=>contracts.ownerChanged(fiber)))
-  const definitelyInvalidArguments=(schema,args)=>{
-    if(!schema||typeof validateToolArguments!=='function')return false
-    try{const violations=validateToolArguments(schema,args,'');return Array.isArray(violations)&&violations.length>0}catch{return false}
+  const argumentViolation=(schema,args,external)=>{
+    if(!schema||typeof schemaTools.validateJsonSchemaValue!=='function')return null
+    try{
+      const violations=schemaTools.validateJsonSchemaValue(schema,args,'')
+      if(!Array.isArray(violations)||typeof violations[0]!=='string')return null
+      // Raw registrations can declare schemas outside the SDK dialect. Only
+      // enforce a refusal when the same SDK also recognizes the whole schema.
+      if(external)schemaTools.assertObjectJsonSchema(schema)
+      return clip(violations[0],400)
+    }catch{return null}
   }
   const editIntents=new Map()
   const rememberIntent=(key,value)=>{editIntents.set(key,value);while(editIntents.size>64)editIntents.delete(editIntents.keys().next().value)}
@@ -514,7 +521,18 @@ async function initializePlugin(ctx,config,options,resources){
     if(!local&&!before.readOnly)resume.assertAction(managed,parent?.session||session,call.name)
     store.recovery.assertTool(managed,call.name,exec.arguments,permitted)
     const argsAtDispatch=before.stamp||permitted?hash(JSON.stringify(exec.arguments)??'undefined'):null
-    const invalidArguments=!!before.origin&&definitelyInvalidArguments(before.definition.parameters,exec.arguments)
+    const violation=local?null:argumentViolation(before.definition?.parameters,exec.arguments,!before.origin)
+    const failureRecall=()=>{if(!/^cm_/.test(exec.name||'')){const owner=parent?.session||session;working.signalEvent(managed,owner,'tool-failure',exec.callId||exec.name,'工具 '+clip(exec.name,100)+' 失败；核对过去相同工具的错误、处理办法与当前任务')}}
+    if(violation&&!before.origin){
+      // Stop here, before next() and before any running journal entry. A code
+      // reported by a downstream tool cannot take this path.
+      const message='Invalid arguments: '+violation
+      const result={isError:true,content:[{type:'text',text:'Error: '+message}],error:{message,info:{name:'ToolArgsError',code:'INVALID_ARGS'}}}
+      execution.rejectArguments(managed,session,call,result)
+      failureRecall()
+      return result
+    }
+    const invalidArguments=!!violation
     const intentKey=session+'\u0000'+call.callId
     const trust=()=>{
       const intent=editIntents.get(intentKey)
@@ -539,7 +557,6 @@ async function initializePlugin(ctx,config,options,resources){
     const attempt=active&&!local&&(!before.readOnly||active.tool===call.name)
     if(attempt)active.attempted=true
     execution.start(managed,session,call,localRead||!!before.origin&&before.readOnly,attempt?active:null)
-    const failureRecall=()=>{if(!/^cm_/.test(exec.name||'')){const owner=parent?.session||session;working.signalEvent(managed,owner,'tool-failure',exec.callId||exec.name,'工具 '+clip(exec.name,100)+' 失败；核对过去相同工具的错误、处理办法与当前任务')}}
     let result
     try{
       const release=permitted?guardHostRead(exec,args=>{

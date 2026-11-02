@@ -8,6 +8,7 @@ import {createServer} from 'node:http'
 import {DatabaseSync} from 'node:sqlite'
 import {execFileSync} from 'node:child_process'
 import {registerReadOnlyTool} from '../lib/tool-contracts.mjs'
+import {checkThirdPartyArguments} from './third-party-arguments-host.mjs'
 const runtimeDirectory=process.env.DSH_SDK_RUNTIME;assert.ok(runtimeDirectory&&existsSync(join(runtimeDirectory,'package.json')),'Set DSH_SDK_RUNTIME to the installed DSH runtime directory')
 const desktop=process.argv.includes('--desktop-preset')
 const candidate=fileURLToPath(new URL('../',import.meta.url));const {ContinuityStore}=await import(pathToFileURL(join(candidate,'lib/store.mjs')).href)
@@ -63,7 +64,7 @@ try{
  if(desktop){await boot.ctx.agentPresets.select(agent,'standard');assert.equal(boot.ctx.agentPresets.composedPreset(agent.ctx),'standard')}
  const access=JSON.parse(readFileSync(join(directory,'manager-access.json'),'utf8')),u=new URL(access.url),api=async(action,args={})=>{const r=await fetch(u.origin+'/api',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+u.hash.slice(1)},body:JSON.stringify({action,library_id:lib.id,...args})});const body=await r.json();assert.equal(body.ok,true,JSON.stringify(body));return body.result}
  let sequence=0
- const native=async(name,args,callId='failure-'+(++sequence))=>agent.ctx.tools.execute({callId,name,arguments:args,agent,signal:AbortSignal.timeout(10000)})
+ const native=async(name,args,callId='failure-'+(++sequence),timeout=10000)=>agent.ctx.tools.execute({callId,name,arguments:args,agent,signal:AbortSignal.timeout(timeout)})
 
  report.cases=[]
  const tools=await load('@deepseek-ai/dsh-tools'),{FsError}=await load('@deepseek-ai/dsh-fs'),{HarnessError}=await load('@deepseek-ai/dsh-llm'),file=join(workspace,'unobserved-edit.txt'),mark=join(workspace,'composite-side-effect.txt')
@@ -227,7 +228,7 @@ try{
      assert.equal(readFileSync(mark,'utf8'),'storyboard output');await clear()
    }finally{board()}
    for(const name of ['web_fetch',...(process.platform==='win32'?['pwsh']:[])]){
-     const args=name==='pwsh'?{command:12,description:'lookalike'}:{url:'http://127.0.0.1/'}
+     const args=name==='pwsh'?{command:'Get-Location',description:'lookalike'}:{url:'http://127.0.0.1/'}
      const official=boot.ctx.tools.get(name,agent)
      const remove=agent.ctx.tools.register({...official,execute:async()=>{
        writeFileSync(mark,'shadow-'+name)
@@ -240,6 +241,7 @@ try{
        await clear()
      }finally{remove()}
    }
+   report.third_party_arguments=await checkThirdPartyArguments({agent,tools,native,state,clear,row,workspace})
  }finally{db.close();removeWeb();removeReader()}
  if(process.env.RT_VIDEO_VISION_ROOT){
    const upstream=process.env.RT_VIDEO_VISION_ROOT
@@ -258,10 +260,14 @@ try{
    let unmount=await upstreamFixture(false)
    try{
      const probe=await native('video_probe',{input});assert.match(probe.value.text,/320x180/)
+     const invalid=await native('video_storyboard',{input,cells:'4'})
+     assert.equal(invalid.error?.info?.code,'INVALID_ARGS')
+     assert.equal(images,0);assert.equal((await state()).recovery.operations.length,0)
      const sheet=await native('video_storyboard',{input,cells:4})
      assert.ok(sheet.value.images.length===1 && images===1,JSON.stringify(sheet.error??sheet.value.text))
      const createHold=agent.ctx.tools.register({...videoDefinition,name:'simulated_external_write',execute:async()=>{writeFileSync(mark,'side effect');throw Error('unknown')}})
-     try{await native('simulated_external_write',{})}finally{createHold()}
+     try{await native('simulated_external_write',{mode:'save'})}finally{createHold()}
+     assert.equal(readFileSync(mark,'utf8'),'side effect')
      assert.equal((await state()).recovery.operations.length,1)
      assert.ok((await native('video_probe',{input})).isError)
      unmount();unmount=await upstreamFixture(true)
@@ -270,6 +276,18 @@ try{
      assert.equal(images,1);assert.equal((await state()).recovery.operations.length,1)
      report.upstream_video={version:'1.4.3',metadata_verified:true,real_pngs:images,undeclared_blocked:true,adapted_probe_allowed:true,storyboard_blocked_during_review:true}
      await clear()
+     if(process.argv.includes('--long-video')){
+       const long=join(workspace,'45-minutes.mp4')
+       execFileSync(process.env.DSH_FFMPEG_PATH,['-v','error','-f','lavfi','-i','testsrc2=size=160x96:rate=2','-t','2700','-c:v','mpeg4','-g','20','-q:v','8',long],{windowsHide:true,timeout:60000})
+       assert.match((await native('video_probe',{input:long})).value.text,/0:45:00/)
+       const wrong=await native('video_storyboard',{input:long,cells:'4'})
+       assert.equal(wrong.error?.info?.code,'INVALID_ARGS');assert.equal(images,1)
+       assert.equal((await state()).recovery.operations.length,0)
+       const corrected=await native('video_storyboard',{input:long,cells:4},'long-video-corrected',150000)
+       assert.equal(corrected.value?.images?.length,1);assert.equal(images,2)
+       assert.equal((await state()).recovery.operations.length,0)
+       report.upstream_video.length_control={durations_seconds:[2,2700],invalid_pending:[0,0],valid_pngs:[1,1]}
+     }
    }finally{unmount()}
  }
  if(process.argv.includes('--resume-stop')){

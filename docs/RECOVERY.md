@@ -1,5 +1,11 @@
 # Recovery
 
+## Third-party parameter errors
+
+In a managed session, a tool with an SDK-supported parameter schema can report a missing field or a type error before the provider starts. The journal records `not_started / schema-preflight`. Correct the indicated field and submit a fresh call. For example, a numeric `cells` field accepts `4` and rejects `"4"`, including for raw plugins that used to coerce the string. An existing recovery hold still takes precedence.
+
+Validation inside a provider can run after a write. If such a provider reports `INVALID_ARGS`, a missing read or execution-stage guarantee leaves the operation pending for review. The same conservative handling applies when the installed SDK cannot verify the declared schema. Historical pending rows keep their original evidence and review flow.
+
 ## 0.3.12 provider checks and process interruption
 
 During recovery, official filesystem search/read tools and supported diagnostic PowerShell or working-directory calls require a matching provider in the active scope. Third-party aliases (including shell or search aliases) need an explicit provider declaration to keep operating during review. Installed local memory operations are checked against their own registered definition. A historical unknown cannot be resolved from its spelling. In ordinary sessions unrecognized external tools can still run.

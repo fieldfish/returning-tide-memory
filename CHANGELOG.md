@@ -1,5 +1,10 @@
 # Changes
 
+## 0.3.14
+
+- Validate third-party calls against their declared, SDK-supported parameter schema before dispatch. Missing fields and type mismatches return a field-specific error and a durable `not_started` record. A corrected call can proceed.
+- For an unverified writer that runs and then reports `INVALID_ARGS`, the existing recovery review still applies. Earlier pending operations keep their recorded status. Providers that previously accepted an out-of-schema value now require the declared type.
+
 ## 0.3.13
 
 - Compare the requested topic with competing passages before selecting automatic working-memory cards. Keep shared project labels separate from discriminating evidence, permit a clear semantic lead, and keep the broader manual search available.

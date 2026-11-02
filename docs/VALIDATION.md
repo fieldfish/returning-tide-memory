@@ -1,5 +1,9 @@
 # Validation
 
+## 0.3.14 third-party argument recovery
+
+Run `npm run test:native-failures` and `npm run test:preset-recovery` with `DSH_SDK_RUNTIME` set. Each starts a private DSH home, session and library. Missing and mistyped arguments must yield zero provider entries and zero pending operations. The corrected call and a separate file write must succeed. A provider that writes a witness file and then throws the same SDK error must leave one pending operation and block a later write before entry. With the optional upstream video setup below, pass `--long-video` to the native runner to exercise 2-second and 45-minute synthetic files with the actual storyboard provider.
+
 ## 0.3.13 release gate
 
 The packaged plugin is exercised with a local embedding model and real DeepSeek dialogue through the DSH SDK. Each test has an isolated source session, a clean receiving session and an explicit library handoff. The receiving model cannot read the answer file, unrelated libraries or arbitrary files. The harness commits the questions, random identifiers, relevant source labels and expected artifact contents before the first turn. It checks both the first outgoing model request and the final answer. The broad manual lookup is measured separately.

@@ -666,6 +666,26 @@ test('a schema validation failure is proof only when the host validator returns 
  }
 })
 
+test('external schema enforcement requires supported SDK rules and respects an existing recovery hold',async t=>{
+ const name='third_party_fixture',definition={name,parameters:{type:'object'},execute(){}}
+ for(const supported of [true,false]){
+  const h=await proofHarness(t,{[name]:definition},{
+   validateJsonSchemaValue:()=>['expected a number'],
+   assertObjectJsonSchema(){if(!supported)throw Error('unsupported schema')}
+  })
+  const lib=await h.bind(),exec=toolExec(h,name,'preflight'),store=h.plugin.store
+  let calls=0
+  const run=async()=>{calls++;return hostError('INVALID_ARGS')}
+  const result=await runTool(h,exec,run)
+  assert.equal(result.isError,true);assert.equal(calls,supported?0:1)
+  assert.equal(store.recovery.needsReview(lib.id),!supported)
+  if(!supported){
+   await assert.rejects(runTool(h,toolExec(h,name,'blocked-preflight'),run),{code:'RECOVERY_REVIEW_REQUIRED'})
+   assert.equal(calls,1)
+  }
+ }
+})
+
 test('unloading during a tool does not replace its later result with a closed-database error',async t=>{
  for(const expected of [{isError:false,content:[{type:'text',text:'Synthetic applied result'}]},{isError:true,error:{info:{name:'SyntheticToolError',code:'TIMEOUT'}},content:[{type:'text',text:'Synthetic native failure'}]}]){
   const h=await harness(t),lib=await h.bind(),target=join(h.directory,'reload-result.txt');let release,started

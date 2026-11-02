@@ -4,6 +4,8 @@
 
 Local long-term retrieval, contextual working memory, and sourced continuity for DSH.
 
+Version 0.3.14 catches invalid third-party tool arguments before dispatch. For example, pass the number `4` for a numeric storyboard field. A refusal at this boundary leaves the session available for the corrected call. [Recovery guide](docs/RECOVERY.md)
+
 Version 0.3.13 adds contrastive working-memory admission and receipt-linked checkpoint resumption. See [working memory and checkpoint execution](docs/WORKING-RESUME.md).
 
 Version 0.3.12 verifies scoped reader identity during recovery and journals registered read entry before provider execution. See the [recovery guide](docs/RECOVERY.md).
